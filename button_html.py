@@ -1,0 +1,162 @@
+import html
+import hashlib
+import json
+import streamlit as st
+
+
+def _safe_text(value):
+    return html.escape(str(value or "").strip())
+
+
+def _record_identifier(rec):
+    url = str(rec.get("OpenAlex URL") or "").strip().lower()
+    if url:
+        return f"url::{url}"
+    title = str(rec.get("Title") or "").strip().lower()
+    return f"title::{title}"
+
+
+def _record_hash(rec_id: str) -> str:
+    return hashlib.md5(rec_id.encode("utf-8")).hexdigest()[:10]
+
+
+def _add_skipped_publication(rec_id: str):
+    skipped = st.session_state.get("html_skipped_publications", [])
+    if rec_id not in skipped:
+        st.session_state["html_skipped_publications"] = skipped + [rec_id]
+
+
+def render_html_preview(payload, container=None, top_n=None):
+    """Render top-N records as a compact HTML-style preview.
+
+    Per record layout (6/7 rows):
+    1) Title, Type
+    2) Year, Citation, Doi
+    3) Relevance Score (if available)
+    4) Authors
+    5) Topic
+    6) Keywords
+    7) Abstract
+    """
+    display = container if container is not None else None
+    if display is None:
+        return
+
+    if not payload:
+        display.warning("No results available.")
+        return
+
+    raw = payload.get("json")
+    if raw is None:
+        display.warning("No results available.")
+        return
+
+    try:
+        records = json.loads(raw)
+    except Exception:
+        display.warning("Could not parse results JSON.")
+        return
+
+    if not isinstance(records, list) or not records:
+        display.warning("No results available.")
+        return
+
+    if top_n is None:
+        preview = records
+    else:
+        preview = records[: max(int(top_n), 1)]
+
+    display.markdown(
+        """
+        <style>
+        .html-preview-card {
+            border: 1px solid #d9e4ee;
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 10px;
+            background: #ffffff;
+        }
+        .html-preview-row {
+            margin: 2px 0;
+            line-height: 1.45;
+            color: #1f2937;
+        }
+        .html-preview-label {
+            color: #1f77b4;
+            font-weight: 600;
+        }
+        .html-preview-view-btn {
+            display: inline-block;
+            margin-left: 8px;
+            padding: 2px 8px;
+            font-size: 12px;
+            line-height: 1.4;
+            color: #ffffff !important;
+            background: #1f77b4;
+            border: 1px solid #1f77b4;
+            border-radius: 6px;
+            text-decoration: none;
+            vertical-align: middle;
+        }
+        .html-preview-view-btn:hover {
+            background: #166aa3;
+            border-color: #166aa3;
+            text-decoration: none;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    for rec in preview:
+        rec_id = _record_identifier(rec)
+        rec_hash = _record_hash(rec_id)
+
+        title = _safe_text(rec.get("Title"))
+        work_type = _safe_text(rec.get("Type"))
+        year = _safe_text(rec.get("Publication Year"))
+        citation = _safe_text(rec.get("Citations"))
+        doi = _safe_text(rec.get("DOI"))
+        relevance = _safe_text(rec.get("Relevance Score"))
+        openalex_url = _safe_text(rec.get("OpenAlex URL"))
+        authors = _safe_text(rec.get("Authors"))
+        topics = _safe_text(rec.get("Topics"))
+        keywords = _safe_text(rec.get("Keywords"))
+        abstract = _safe_text(rec.get("Abstract"))
+
+        relevance_row = ""
+        view_btn = ""
+        if openalex_url:
+            view_btn = (
+                f'<a class="html-preview-view-btn" href="{openalex_url}" target="_blank" rel="noopener noreferrer">View</a>'
+            )
+
+        if relevance or openalex_url:
+            url_part = f", <span class=\"html-preview-label\">OpenAlex URL</span>: {openalex_url}" if openalex_url else ""
+            relevance_row = (
+                f'<div class="html-preview-row"><span class="html-preview-label">Relevance Score</span>: {relevance}{url_part}{view_btn}</div>'
+            )
+
+        card_html = f"""
+        <div class="html-preview-card">
+            <div class="html-preview-row"><span class="html-preview-label">Title</span>: {title}, <span class="html-preview-label">Type</span>: {work_type}</div>
+            <div class="html-preview-row"><span class="html-preview-label">Year</span>: {year}, <span class="html-preview-label">Citation</span>: {citation}, <span class="html-preview-label">Doi</span>: {doi}</div>
+            {relevance_row}
+            <div class="html-preview-row"><span class="html-preview-label">Authors</span>: {authors}</div>
+            <div class="html-preview-row"><span class="html-preview-label">Topic</span>: {topics}</div>
+            <div class="html-preview-row"><span class="html-preview-label">Keywords</span>: {keywords}</div>
+            <div class="html-preview-row"><span class="html-preview-label">Abstract</span>: {abstract}</div>
+        </div>
+        """
+
+        card_col, skip_col = display.columns([20, 1])
+        with card_col:
+            card_col.markdown(card_html, unsafe_allow_html=True)
+        with skip_col:
+            st.button(
+                "Skip",
+                key=f"skip_pub_{rec_hash}",
+                use_container_width=True,
+                on_click=_add_skipped_publication,
+                args=(rec_id,),
+            )
