@@ -1,0 +1,9 @@
+matplotlib==3.9.2
+numpy==2.1.1
+pandas==2.2.3
+plotly==5.24.1
+pyalex==0.18
+python-dotenv==1.0.1
+pyscopus==1.0.3
+requests==2.32.3
+scidownl==1.0.2
