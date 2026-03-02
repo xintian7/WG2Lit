@@ -2,6 +2,7 @@ import json
 import math
 from collections import Counter
 from itertools import combinations
+from typing import Any
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -17,7 +18,11 @@ except Exception:
     WordCloud = None
 
 
-def perform_analyze(payload, year_range, container=None):
+def perform_analyze(
+    payload: dict[str, Any] | None,
+    year_range: tuple[int, int],
+    container: Any = None,
+) -> None:
     """Render publication/year analytics and a top-keyword frequency heatmap.
 
     Parameters

@@ -1,11 +1,15 @@
 import json
+from typing import Any
+
 import pandas as pd
 import streamlit as st
 from pyalex import Works
 from pyalex.api import QueryError
 
+from utils import OPENALEX_PAGE_SIZE, DISPLAY_CONTAINER_HEIGHT
 
-def get_work_topics(work):
+
+def get_work_topics(work: dict[str, Any]) -> str:
     """Extract topic display names from an OpenAlex work.
 
     Uses both `primary_topic` and `topics` (if present), de-duplicated in order.
@@ -39,7 +43,15 @@ def get_work_topics(work):
     return "; ".join(deduped)
 
 
-def perform_search(keyword, year_range, num_results, work_types=None, container=None, display_limit=5, sort_by="Relevance"):
+def perform_search(
+    keyword: str,
+    year_range: tuple[int, int],
+    num_results: int,
+    work_types: list[str] | None = None,
+    container: Any = None,
+    display_limit: int = 5,
+    sort_by: str = "Relevance",
+) -> dict[str, Any] | None:
     """Perform a search against OpenAlex and render results.
 
     This function assumes a Search button in `app.py` calls it; it does not create its own button.
@@ -85,9 +97,9 @@ def perform_search(keyword, year_range, num_results, work_types=None, container=
             requested_n = max(int(num_results), 1)
             openalex_total = 0
 
-            def _fetch_paginated(query, limit):
-                """Fetch up to `limit` records across multiple OpenAlex pages (API page size max is 200)."""
-                page_size = 200
+            def _fetch_paginated(query: Any, limit: int) -> list[dict[str, Any]]:
+                """Fetch up to `limit` records across multiple OpenAlex pages."""
+                page_size = OPENALEX_PAGE_SIZE
                 page = 1
                 collected = []
                 while len(collected) < limit:
@@ -321,7 +333,7 @@ def perform_search(keyword, year_range, num_results, work_types=None, container=
     display.caption(caption_text)
 
     # Present results in the provided container as JSON-like output with scroll
-    json_container = display.container(height=420, border=True)
+    json_container = display.container(height=DISPLAY_CONTAINER_HEIGHT, border=True)
     json_container.code(display_json, language="json")
 
     csv = df.to_csv(index=False).encode("utf-8")

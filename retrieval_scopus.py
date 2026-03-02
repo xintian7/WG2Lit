@@ -1,13 +1,13 @@
 # Code to download abstract from Scopus API based on keywords or author names or titles or DOIs
 import os
+import logging
+from itertools import chain
+
 from dotenv import load_dotenv
 import pandas as pd
 import numpy as np
-import os
-import logging 
 from pyscopus import Scopus
 import requests
-from itertools import chain
 """
 Reference: https://dev.elsevier.com/sc_search_tips.html
 https://dev.elsevier.com/documentation/ObjectRetrievalAPI.wadl#d1e5005
@@ -260,7 +260,7 @@ def literature(keywords, Lim_nr=5, Lim_lvl=0):
             pass
         df_ref = pp.get_pub_from_ref(pp, df_temp)
         df_ref['level'] = i+1
-        df_publication = df_publication.append(df_ref, ignore_index=True)
+        df_publication = pd.concat([df_publication, df_ref], ignore_index=True)
         
     return df_publication
 

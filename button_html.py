@@ -1,32 +1,31 @@
 import html
 import hashlib
 import json
+from typing import Any
+
 import streamlit as st
 
+from utils import record_identifier
 
-def _safe_text(value):
+
+def _safe_text(value: Any) -> str:
+    """Escape a value for safe HTML rendering."""
     return html.escape(str(value or "").strip())
 
 
-def _record_identifier(rec):
-    url = str(rec.get("OpenAlex URL") or "").strip().lower()
-    if url:
-        return f"url::{url}"
-    title = str(rec.get("Title") or "").strip().lower()
-    return f"title::{title}"
-
-
 def _record_hash(rec_id: str) -> str:
+    """Generate a short hash for a record identifier."""
     return hashlib.md5(rec_id.encode("utf-8")).hexdigest()[:10]
 
 
-def _add_skipped_publication(rec_id: str):
+def _add_skipped_publication(rec_id: str) -> None:
+    """Add a publication to the skipped list in session state."""
     skipped = st.session_state.get("html_skipped_publications", [])
     if rec_id not in skipped:
         st.session_state["html_skipped_publications"] = skipped + [rec_id]
 
 
-def render_html_preview(payload, container=None, top_n=None):
+def render_html_preview(payload: dict | None, container: Any = None, top_n: int | None = None) -> None:
     """Render top-N records as a compact HTML-style preview.
 
     Per record layout (6/7 rows):
@@ -109,7 +108,7 @@ def render_html_preview(payload, container=None, top_n=None):
     )
 
     for rec in preview:
-        rec_id = _record_identifier(rec)
+        rec_id = record_identifier(rec)
         rec_hash = _record_hash(rec_id)
 
         title = _safe_text(rec.get("Title"))

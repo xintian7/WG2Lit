@@ -1,23 +1,33 @@
+"""Download XML and PDF papers from Elsevier and Sci-Hub."""
+
 import os
+from typing import Any
+
 import requests
 from dotenv import load_dotenv
 from scidownl import scihub_download
 
-def save_xml(doi, xml_content, output_dir="paper"):
+
+def save_xml(doi: str, xml_content: str, output_dir: str = "paper") -> None:
+    """Save XML content to a file named after the DOI."""
     os.makedirs(output_dir, exist_ok=True)
     filename = os.path.join(output_dir, doi.replace("/", "_") + ".xml")
     with open(filename, "w", encoding="utf-8") as f:
         f.write(xml_content)
     print(f"XML saved to {filename}")
 
-def download_pdf(doi, output_dir="paper", proxies=None):
+
+def download_pdf(doi: str, output_dir: str = "paper", proxies: dict[str, str] | None = None) -> None:
+    """Download a PDF from Sci-Hub using the DOI."""
     os.makedirs(output_dir, exist_ok=True)
     paper_url = f"https://doi.org/{doi}"
     out = os.path.join(output_dir, doi.replace("/", "_") + ".pdf")
     scihub_download(paper_url, paper_type="doi", out=out, proxies=proxies)
     print(f"PDF attempted download to {out}")
 
-def main():
+
+def main() -> None:
+    """Main entry point for downloading papers."""
     load_dotenv()
     api_key = os.getenv("scopus_api_key_tian") # Replace with your API key here
     if not api_key:

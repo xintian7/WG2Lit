@@ -7,17 +7,10 @@ from button_search import perform_search
 from button_analyze import perform_analyze
 from button_neo4j import build_neo4j_cypher
 from button_html import render_html_preview
+from utils import record_identifier, DISPLAY_CONTAINER_HEIGHT, MAX_WORK_TYPES
 
 
-def _record_identifier(rec):
-    rec_url = str((rec or {}).get("OpenAlex URL") or "").strip().lower()
-    if rec_url:
-        return f"url::{rec_url}"
-    rec_title = str((rec or {}).get("Title") or "").strip().lower()
-    return f"title::{rec_title}"
-
-
-def _payload_after_skips(payload):
+def _payload_after_skips(payload: dict | None) -> dict | None:
     """Return a payload filtered by skipped publications for downloads."""
     if not payload:
         return payload
@@ -36,7 +29,7 @@ def _payload_after_skips(payload):
 
     filtered_records = [
         rec for rec in records
-        if _record_identifier(rec) not in skipped_ids
+        if record_identifier(rec) not in skipped_ids
     ]
 
     filtered_payload = dict(payload)
@@ -216,9 +209,9 @@ with type_col2:
         label_visibility="collapsed",
         key="wt",
     )
-    if work_types and len(work_types) > 3:
-        st.warning("You selected more than 3 types — only the first 3 will be used.")
-        work_types = work_types[:3]
+    if work_types and len(work_types) > MAX_WORK_TYPES:
+        st.warning(f"You selected more than {MAX_WORK_TYPES} types — only the first {MAX_WORK_TYPES} will be used.")
+        work_types = work_types[:MAX_WORK_TYPES]
 
 # Number of results: label line then control line
 label_col, help_col = st.columns([1, 4])
@@ -407,17 +400,10 @@ if cached_payload:
 if isinstance(html_records_all, list) and html_records_all:
     skipped_ids = set(st.session_state.get("html_skipped_publications", []))
 
-    def _html_record_identifier(rec):
-        rec_url = str((rec or {}).get("OpenAlex URL") or "").strip().lower()
-        if rec_url:
-            return f"url::{rec_url}"
-        rec_title = str((rec or {}).get("Title") or "").strip().lower()
-        return f"title::{rec_title}"
-
     if skipped_ids:
         html_records_all = [
             rec for rec in html_records_all
-            if _html_record_identifier(rec) not in skipped_ids
+            if record_identifier(rec) not in skipped_ids
         ]
 
 if isinstance(html_records_all, list) and html_records_all:
