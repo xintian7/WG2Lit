@@ -108,7 +108,7 @@ with input_col:
 with st.sidebar:
     st.header("About")
     st.markdown(
-        "<span style='color: #00a9cf; font-weight: bold;'>Climate Knowledge Finder</span> "
+        "<span style='color: #00a9cf; font-weight: bold;'>Climate Knowledge Finder</span> (ver 0.1) "
         "is a web app developed by the IPCC [WGII](https://www.ipcc.ch/working-group/wg2/) TSU to help IPCC authors find climate-related grey literature from [OpenAlex](https://openalex.org)'s database. "
         "Please contact xxx@ipccwg2.org if you have any questions or suggestions.",
         unsafe_allow_html=True
