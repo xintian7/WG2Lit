@@ -16,6 +16,17 @@ from utils import (
 )
 
 
+hide_menu = """
+<style>
+# MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+</style>
+"""
+
+st.markdown(hide_menu, unsafe_allow_html=True)
+
+
 def _payload_after_skips(payload: dict | None) -> dict | None:
     """Return a payload filtered by skipped publications for downloads."""
     if not payload:
