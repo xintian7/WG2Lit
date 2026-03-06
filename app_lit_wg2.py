@@ -18,9 +18,9 @@ from utils import (
 
 hide_menu = """
 <style>
-# MainMenu {visibility: hidden;}
+MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
-header {visibility: hidden;}
+header {visibility: visible;}
 </style>
 """
 
