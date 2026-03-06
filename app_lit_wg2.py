@@ -19,11 +19,6 @@ from utils import (
 st.markdown("""
 <style>
 
-/* Hide top toolbar (Fork + GitHub) */
-[data-testid="stToolbar"]{
-    display:none;
-}
-
 /* Hide Streamlit footer ("Hosted with Streamlit") */
 footer {
     visibility: hidden;
