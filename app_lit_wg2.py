@@ -24,19 +24,19 @@ st.markdown("""
     display:none;
 }
 
-/* Hide bottom-left decoration (GitHub avatar) */
-[data-testid="stDecoration"]{
-    display:none;
+/* Hide Streamlit footer ("Hosted with Streamlit") */
+footer {
+    visibility: hidden;
 }
 
-/* Hide floating deploy/share button */
-.stDeployButton{
-    display:none;
+/* Hide GitHub + Streamlit footer container */
+[data-testid="stStatusWidget"] {
+    display: none;
 }
 
-/* Hide Streamlit footer */
-footer{
-    display:none;
+/* Hide bottom decoration (GitHub avatar / repo badge) */
+[data-testid="stDecoration"] {
+    display: none;
 }
             
 </style>
