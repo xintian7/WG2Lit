@@ -30,11 +30,6 @@ footer {
     display: none !important;
 }
 
-/* Hide GitHub + Streamlit footer container */
-[data-testid="stStatusWidget"] {
-    display: none;
-}
-
 /* Hide bottom decoration (GitHub avatar / repo badge) */
 [data-testid="stDecoration"] {
     display: none;
