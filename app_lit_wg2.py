@@ -1,7 +1,12 @@
 import streamlit as st
 from pathlib import Path
 import json
+import os
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import pandas as pd
+import requests
+from dotenv import load_dotenv
 
 from button_search import perform_search
 from button_analyze import perform_analyze
@@ -14,6 +19,9 @@ from utils import (
     UN_MEMBER_STATES,
     UN_MEMBER_STATE_TO_COUNTRY_CODE,
 )
+
+
+load_dotenv()
 
 
 st.markdown("""
@@ -103,28 +111,134 @@ def render_text_document_page(doc_key: str) -> None:
     st.markdown("[Back to Climate Literature Navigator](?doc=)")
 
 
-def _get_doc_query_param() -> str | None:
-    """Return the requested document key from query params, if any."""
+def _get_query_param(param_name: str) -> str | None:
+    """Return the requested query param, if any."""
     try:
         query_params = st.query_params
-        doc_key = query_params.get("doc")
+        value = query_params.get(param_name)
     except Exception:
         query_params = st.experimental_get_query_params()
-        doc_values = query_params.get("doc")
-        doc_key = doc_values[0] if isinstance(doc_values, list) and doc_values else doc_values
+        values = query_params.get(param_name)
+        value = values[0] if isinstance(values, list) and values else values
 
-    if isinstance(doc_key, list):
-        doc_key = doc_key[0] if doc_key else None
+    if isinstance(value, list):
+        value = value[0] if value else None
 
-    if doc_key is None:
+    if value is None:
         return None
 
-    doc_key = str(doc_key).strip()
-    return doc_key or None
+    value = str(value).strip()
+    return value or None
 
+
+def _write_feedback_to_notion(
+    name: str,
+    chapter: str,
+    email: str,
+    message: str,
+    contact_ok: bool,
+) -> tuple[bool, str]:
+    token = os.getenv("NOTION_TOKEN")
+    database_id = os.getenv("DATABASE_ID")
+    if not token or not database_id:
+        return False, "Notion credentials are missing in the environment."
+
+    title_value = name.strip() or "Feedback"
+    email_value = email.strip() if email.strip() else None
+    cet_now = datetime.now(ZoneInfo("Europe/Paris")).isoformat()
+    properties = {
+        "Title": {"title": [{"text": {"content": title_value}}]},
+        "App name": {"rich_text": [{"text": {"content": "Literature"}}]},
+        "Name": {"rich_text": [{"text": {"content": name}}]},
+        "Chapter": {"rich_text": [{"text": {"content": chapter}}]},
+        "Email": {"email": email_value},
+        "Question or Suggestion": {"rich_text": [{"text": {"content": message}}]},
+        "Further Contact": {"rich_text": [{"text": {"content": "Yes" if contact_ok else "No"}}]},
+        "Datetime": {"date": {"start": cet_now}},
+    }
+
+    payload = {
+        "parent": {"database_id": database_id},
+        "properties": properties,
+    }
+
+    response = requests.post(
+        "https://api.notion.com/v1/pages",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Notion-Version": "2022-06-28",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=20,
+    )
+
+    if response.status_code >= 300:
+        try:
+            error_detail = response.json()
+        except ValueError:
+            error_detail = response.text
+        return (
+            False,
+            "Failed to submit feedback to Notion. Response detail: "
+            f"{error_detail}",
+        )
+
+    return True, "Thank you! Your feedback has been submitted."
+
+
+def render_feedback_page() -> None:
+    st.divider()
+    st.markdown("## Climate Literature Navigator")
+    st.markdown("Any feedback is welcome! Please share your questions or suggestions below to help us improve the app. We will review all feedback carefully and get back to you if you indicate that we can contact you.")
+    st.markdown("Please fill out the form below. Fields marked with * are required.")
+
+    with st.form("feedback_form"):
+        name = st.text_input("Name (optional)", value="")
+        chapter = st.text_input("Chapter (optional)", value="")
+        email = st.text_input("Email address (required if you want to be contacted)", value="")
+        message = st.text_area("Question or suggestion *", value="", height=160)
+        contact_ok = st.checkbox("I would like to be contacted about this inquiry", value=False)
+        submitted = st.form_submit_button("Submit")
+
+    if submitted:
+        missing = [
+            label
+            for label, value in (
+                ("Question or suggestion", message.strip()),
+            )
+            if not value
+        ]
+        if contact_ok and not email.strip():
+            missing.append("Email address")
+        email_value = email.strip()
+        if email_value and "@" not in email_value:
+            st.error("Please enter a valid email address.")
+        elif missing:
+            st.error(f"Please complete the required fields: {', '.join(missing)}.")
+        else:
+            ok, msg = _write_feedback_to_notion(
+                name=name.strip(),
+                chapter=chapter.strip(),
+                email=email.strip(),
+                message=message.strip(),
+                contact_ok=contact_ok,
+            )
+            if ok:
+                st.success(msg)
+            else:
+                st.error(msg)
+
+    st.markdown("[Back to Climate Literature Navigator](?page=)")
+
+
+page_key = _get_query_param("page")
+if page_key == "feedback":
+    render_feedback_page()
+    st.stop()
 
 # Render doc pages before the main UI.
-doc_key = _get_doc_query_param()
+doc_key = _get_query_param("doc")
 if doc_key:
     render_text_document_page(doc_key)
     st.stop()
@@ -231,18 +345,34 @@ with st.sidebar:
         "<span style='color: #00a9cf; font-weight: bold;'>Climate Literature Navigator</span> "
         " is fully sourced from <a href='https://openalex.org'>OpenAlex</a>. "
         "While we strive to ensure accuracy, we cannot guarantee the completeness or reliability of the data. "
-        "Users are encouraged to verify the information independently before making decisions based on it.</p>",
+        "Users should verify the information independently before making decisions based on it.</p>",
         unsafe_allow_html=True
     )
 
+    st.sidebar.markdown("### User Guide")
+    st.sidebar.markdown(
+        "Please carefully read the [User Guide](https://xintian.notion.site/Climate-Literature-Navigator-User-guide-35a34913e84c805299cffccb92293cba)."
+    )
+
+    st.sidebar.markdown("### Give feedback")
+    st.sidebar.markdown(
+        "Please share your questions or suggestions using the "
+        "[feedback form](?page=feedback)."
+    )
+
     st.sidebar.markdown("### To-do")
-    st.sidebar.checkbox("Authentications for GS users.", value=False, key="todo_auth_gs")
-    st.sidebar.checkbox("Knowledge graphs and network analysis.", value=False, key="todo_kg")
-    st.sidebar.checkbox("More flexible search controls (e.g., more types, more filters).", value=False, key="todo_search_controls")
-    st.sidebar.checkbox("More result metadata (e.g., abstracts) and better display (e.g., HTML preview, highlights).", value=False, key="todo_metadata")
-    st.sidebar.checkbox("Performance improvements for larger result sets.", value=False, key="todo_perf")
-    st.sidebar.checkbox("More export formats (e.g., Excel, Zotero, EndNote).", value=False, key="todo_exports")
-    st.sidebar.checkbox("User accounts and saved searches.", value=False, key="todo_accounts")
+    st.sidebar.checkbox("General maintenance after LAM2 (v0.1b)", value=False, key="todo_auth_gs")
+    st.sidebar.checkbox("Add multi-page tabs (v0.2)", value=False, key="todo_multi_page")
+    st.sidebar.checkbox("Add more databases, e.g. Scopus, Overton, CORE, ReliefWeb (v0.3)", value=False, key="todo_search_sources")
+    st.sidebar.checkbox("Add cloud-based features (v0.4)", value=False, key="todo_cloud")
+    st.sidebar.checkbox("Performance improvements for larger result sets (v0.4)", value=False, key="todo_performance")
+    st.sidebar.checkbox("General maintenance (v0.4)", value=False, key="todo_maintenance")
+    st.sidebar.checkbox("User accounts and saved searches (v0.5)", value=False, key="todo_accounts")
+    st.sidebar.checkbox("Add Load CSV functionality (v0.5)", value=False, key="todo_load_csv")
+    st.sidebar.checkbox("Add semantic analysis (v0.6)", value=False, key="todo_analysis")
+    st.sidebar.checkbox("Add knowledge graphs (v0.7)", value=False, key="todo_knowledge_graph")
+    st.sidebar.checkbox("UI enhancements (v0.8)", value=False, key="todo_ui_enhancements")
+
     # logo_path = Path(__file__).parent / "assets" / "ipcc.png"
     # if logo_path.exists():
     #     st.sidebar.image(str(logo_path), width=200)
@@ -263,7 +393,7 @@ kw_col1, kw_col2 = st.columns([1, 4])
 with kw_col1:
     st.write("")
 with kw_col2:
-    keyword = st.text_input("", value="climate change; water", label_visibility="collapsed", key="kw")
+    keyword = st.text_input("", value="climate change", label_visibility="collapsed", key="kw")
 
 # Publication year: label+help line, then slider line
 label_col, help_col = st.columns([1, 4])

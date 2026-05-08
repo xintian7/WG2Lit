@@ -1,6 +1,6 @@
 # Guidance
 
-This document helps IPCC AR7 WGII authors use **Climate Literature Navigator (version 0.1)** to look for grey literature about climate-related topics.
+This document helps IPCC AR7 WGII authors use **Climate Literature Navigator (version 0.1)** to look for climate-related literature.
 
 ## 1) What this app does 
 
@@ -21,20 +21,19 @@ This document helps IPCC AR7 WGII authors use **Climate Literature Navigator (ve
 ### Web App Url 
 https://wg2literature.streamlit.app/ 
 
-## 3) Core controls in Grey literature searching
+## 3) Core controls in Literature searching
 
 -   **Keyword**: separate terms with `;` (AND logic).
 -   **Publication year**: inclusive year range.
--   **Type**: up to 3 selected types are used.
--   **Language**: language filter (default English).
--   **Global South**: include only works with Global South institutions when checked.
+-   **Type**: up to 3 selected types are used (Article, Book, Book Chapter, Dataset, Dissertation, Editorial, Erratum, Letter, Monograph, Paratext, Peer Review, Preprint, Reference Entry, Report, Review, Standard, Supplementary Materials).
+-   **Language**: language filter (default English). Available: English, Arabic, Chinese, French, Russian, Spanish.
 -   **UN member states**: include only works with at least one institution from selected member state.
 -   **Max Number / Type**: fetch size per type.
 -   **Sort by**: Relevance, Citation count, Date.
 
 ## 4) Buttons and outputs
 
-In **Grey literature searching**:
+In **Literature searching**:
 -   **Search OpenAlex**: runs query and updates current payload.
 -   **Analyze Results**: runs analysis on latest payload (cached data).
 -   **Clear Results**: clears current visible output state.
@@ -51,7 +50,7 @@ In **Grey Literature Review & Export**:
 
 ### Scenario
 
-You are preparing references on climate-water in East Africa and look for policy-relevant grey literature.
+You are preparing references on climate-water in Kenya and look for policy-relevant grey literature.
 
 ### Steps
 
@@ -59,11 +58,10 @@ You are preparing references on climate-water in East Africa and look for policy
 2.  Set **Publication year** to `(2020, 2026)`.
 3.  Set **Type** to `report` and `preprint`.
 4.  Keep **Language** as `English` (default).
-5.  Tick **Global South**.
-6.  Set **UN member states** to `Kenya` (or another focus country).
-7.  Set **Max Number / Type** to `325` and **Sort by** to `Relevance`.
-8.  Click **Search OpenAlex**. 
-9.  Click **Analyze Results**, which shows 
+5.  Set **UN member states** to `Kenya` (or another focus country).
+6.  Set **Max Number / Type** to `325` and **Sort by** to `Relevance`.
+7.  Click **Search OpenAlex**. 
+8.  Click **Analyze Results**, which shows 
     - The number of publications per year
     ![alt text](assets/md_totalpublication.png)
     - The occurrence of top 10 key words 
@@ -75,17 +73,17 @@ You are preparing references on climate-water in East Africa and look for policy
     - Word cloud of keywords (under construction)
     ![alt text](assets/md_keywords_wordcloud.png)
 
-10. Now you have the options to save (all) the results as CSV, JSON, or Neo4j files. 
-11. Click **View html** and select topics. 
-12. You can read the metadata and abstracts of the publications.  
+9. Now you have the options to save (all) the results as CSV, JSON, or Neo4j files. 
+10. Click **View html** and select topics. 
+11. You can read the metadata and abstracts of the publications.  
 ![alt text](assets/md_publication_metadata_abstracts.png)
-13. For less relevant publications, you can click on the **skip** button can optionally download the remaining results again.  
-14. Other buttons are still under construction at this moment. 
-15. If you'd like to search other topics, you can refresh the page and search again. 
+12. For less relevant publications, you can click on the **skip** button can optionally download the remaining results again.  
+13. Other buttons are still under construction at this moment. 
+14. If you'd like to search other topics, you can refresh the page and search again. 
 
 ## 7) Troubleshooting
 
--   **No results**: broaden years, remove country filter, or untick Global South.
+-   **No results**: broaden years or remove the country filter.
 -   **Too many results**: tighten keywords, narrow years, reduce types.
 -   **Slow response**: lower Max Number / Type.
 -   **Analyze disabled**: run Search first.
