@@ -292,8 +292,8 @@ div.stDownloadButton > button:hover {
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-title"> Climate Literature Navigator 🔎 </div>', unsafe_allow_html=True)
-st.markdown("<h3 style='text-align:center'>Settings</h3>", unsafe_allow_html=True)
+st.markdown('<div class="main-title"> Climate Literature Navigator </div>', unsafe_allow_html=True)
+st.markdown("<h3 style='text-align:center'>Settings 🛠️</h3>", unsafe_allow_html=True)
 
 # OpenAlex API control below title
 label_col, input_col = st.columns([1, 4])
@@ -381,7 +381,7 @@ with st.sidebar:
 
 # Main search section (centered title and controls in one row)
 st.divider()
-st.markdown("<h3 style='text-align:center'>Literature searching</h3>", unsafe_allow_html=True)
+st.markdown("<h3 style='text-align:center'>Literature searching 🔎</h3>", unsafe_allow_html=True)
 
 # Keyword: label+help line, then control line
 label_col, help_col = st.columns([1, 4])
@@ -394,6 +394,12 @@ with kw_col1:
     st.write("")
 with kw_col2:
     keyword = st.text_input("", value="climate change", label_visibility="collapsed", key="kw")
+    use_semantic_search = st.checkbox(
+        "Semantic search",
+        value=False,
+        key="semantic_search",
+        help="If checked, use semantic search (broader matching). If unchecked, use regular Boolean search (more precise matching)",
+    )
 
 # Publication year: label+help line, then slider line
 label_col, help_col = st.columns([1, 4])
@@ -606,6 +612,7 @@ with btn_col:
                 container=results_container,
                 display_limit=5,
                 sort_by=sort_by,
+                use_semantic_search=use_semantic_search,
             )
             st.session_state["last_payload"] = result_payload
             # Clear any cached analysis when a new search is run
@@ -704,7 +711,7 @@ with btn_col:
             )
 
 st.divider()
-st.markdown("<h3 style='text-align:center'>Grey Literature Review & Export</h3>", unsafe_allow_html=True)
+st.markdown("<h3 style='text-align:center'>Literature Review & Export 📑</h3>", unsafe_allow_html=True)
 
 cached_payload = st.session_state.get("last_payload")
 _, html_btn_wrap, _ = st.columns([1, 4, 1])

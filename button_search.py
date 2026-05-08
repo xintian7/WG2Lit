@@ -43,6 +43,49 @@ def get_work_topics(work: dict[str, Any]) -> str:
     return "; ".join(deduped)
 
 
+def _build_work_text_blob(work: dict[str, Any]) -> str:
+    """Build a lowercase text blob from key searchable fields."""
+    title = str(work.get("title") or "")
+
+    # Reconstruct abstract text from OpenAlex inverted index.
+    abstract_text = ""
+    inverted = work.get("abstract_inverted_index")
+    if isinstance(inverted, dict) and inverted:
+        try:
+            max_pos = max((max(pos) for pos in inverted.values() if pos), default=-1)
+            if max_pos >= 0:
+                tokens = [""] * (max_pos + 1)
+                for word, positions in inverted.items():
+                    if not isinstance(positions, list):
+                        continue
+                    for p in positions:
+                        if isinstance(p, int) and 0 <= p < len(tokens):
+                            tokens[p] = str(word)
+                abstract_text = " ".join(tok for tok in tokens if tok)
+        except Exception:
+            abstract_text = ""
+
+    keywords_text = " ".join(
+        str(k.get("display_name") or "")
+        for k in (work.get("keywords") or [])
+        if isinstance(k, dict)
+    )
+
+    topics_text = " ".join(
+        str(t.get("display_name") or "")
+        for t in (work.get("topics") or [])
+        if isinstance(t, dict)
+    )
+
+    return " ".join([title, abstract_text, keywords_text, topics_text]).lower()
+
+
+def _matches_all_keywords(work: dict[str, Any], keywords_list: list[str]) -> bool:
+    """Return True only if all keyword phrases are present (AND semantics)."""
+    blob = _build_work_text_blob(work)
+    return all(kw.lower() in blob for kw in keywords_list)
+
+
 def perform_search(
     keyword: str,
     year_range: tuple[int, int],
@@ -54,6 +97,7 @@ def perform_search(
     container: Any = None,
     display_limit: int = 5,
     sort_by: str = "Relevance",
+    use_semantic_search: bool = False,
 ) -> dict[str, Any] | None:
     """Perform a search against OpenAlex and render results.
 
@@ -106,7 +150,11 @@ def perform_search(
             def _format_keyword(kw):
                 return f'"{kw}"' if " " in kw else kw
 
-            combined_query = " AND ".join(_format_keyword(kw) for kw in keywords_list)
+            combined_query = (
+                " ".join(keywords_list)
+                if use_semantic_search
+                else " AND ".join(_format_keyword(kw) for kw in keywords_list)
+            )
             requested_n = max(int(num_results), 1)
             openalex_total = 0
 
@@ -197,6 +245,13 @@ def perform_search(
                         break
 
                 all_results = unique_results
+
+            # Enforce strict AND semantics for ';' separated keyword phrases in Boolean mode.
+            if keywords_list and not use_semantic_search:
+                all_results = [
+                    w for w in all_results
+                    if isinstance(w, dict) and _matches_all_keywords(w, keywords_list)
+                ]
 
             results = all_results
 
