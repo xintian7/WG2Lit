@@ -348,6 +348,25 @@ div[data-testid="stMultiSelect"]:has(input[id*="html_topic_filter"]) [data-basew
     text-overflow: ellipsis;
     line-height: 1.2;
 }
+
+/* Keep emphasized terms in captions blue */
+div[data-testid="stCaptionContainer"] strong {
+    color: #00a9cf !important;
+    font-weight: 700 !important;
+    opacity: 1 !important;
+}
+
+/* Keep caption links in the same app cyan */
+div[data-testid="stCaptionContainer"] a,
+div[data-testid="stCaptionContainer"] a:link,
+div[data-testid="stCaptionContainer"] a:visited,
+div[data-testid="stCaptionContainer"] a:hover,
+div[data-testid="stCaptionContainer"] a:active {
+    color: #00a9cf !important;
+    font-weight: 700 !important;
+    text-decoration-thickness: 2px;
+    opacity: 1 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -452,19 +471,15 @@ label_col, help_col = st.columns([1, 4])
 with label_col:
     st.markdown("**Keyword**")
 with help_col:
-    st.markdown(
-        "<div style='font-size: 0.875rem; color: rgba(49, 51, 63, 0.8);'>"
-        "Use Boolean operators to combine terms:<br>"
-        "<b style='color:#1f77b4'>AND</b>: requires all terms,<br>"
-        "<b style='color:#1f77b4'>OR</b>: allows either term,<br>"
-        "<b style='color:#1f77b4'>Parentheses</b>: group logic,<br>"
-        "<b style='color:#1f77b4'>Quotes</b>: exact phrases.<br>"
-        "<b style='color:#1f77b4'>Notes</b>: Other Operators are not supported at this moment. "
-        "Please submit feedback using the feedback form if you need additional operators.<br>"
-        "<b style='color:#1f77b4'>Example</b>: \"climate change\" AND (water OR \"land use\") AND Bahamas.<br>"
-        "<b style='color:#1f77b4'>Reference</b>: https://developers.openalex.org/guides/searching"
-        "</div>",
-        unsafe_allow_html=True,
+    st.caption(
+        "Use Boolean operators to combine terms:  \n"
+        "**AND**: requires all terms,  \n"
+        "**OR**: allows either term,  \n"
+        "**Parentheses**: group logic,  \n"
+        "**Quotes**: exact phrases,  \n"
+        "**Notes**: Other operators are not supported at this moment. Please submit feedback using the feedback form if you need additional operators.  \n"
+        "**Example**: \"climate change\" AND (water OR \"land use\") AND Bahamas.  \n"
+        "**Reference**: [OpenAlex searching guide](https://developers.openalex.org/guides/searching)"
     )
 kw_col1, kw_col2 = st.columns([1, 4])
 with kw_col1:
@@ -616,16 +631,10 @@ label_col, help_col = st.columns([1, 4])
 with label_col:
     st.markdown("**UN member states**")
 with help_col:
-    st.markdown(
-        "<div style='font-size: 0.875rem; color: rgba(49, 51, 63, 0.8);'>"
-        "Filter results to works where "
-        "<span style='color:#1f77b4; font-weight:600;'>"
-        "at least one institution/affiliation of this publication is from the selected UN member state"
-        "</span>"
-        " (https://www.un.org/en/about-us/member-states). "
+    st.caption(
+        "Filter results to works where **at least one institution/affiliation of this publication is from the selected UN member state** "
+        "([UN member states](https://www.un.org/en/about-us/member-states)). "
         "When this filter is not applied, results will include works from any state worldwide."
-        "</div>",
-        unsafe_allow_html=True,
     )
 state_col1, state_col2 = st.columns([1, 4])
 with state_col1:

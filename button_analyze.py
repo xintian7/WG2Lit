@@ -35,6 +35,7 @@ def perform_analyze(
         Where to render the chart.  Falls back to ``st`` if not provided.
     """
     display = container if container is not None else st
+    transparent_bg = "rgba(0,0,0,0)"
 
     if not payload:
         display.warning("No search results to analyze. Please run a search first.")
@@ -152,13 +153,14 @@ def perform_analyze(
                 yanchor="top",
                 y=1,
                 xanchor="left",
-                x=1.01,
+                x=1.06,
                 font=dict(size=10),
+                bgcolor=transparent_bg,
             ),
             height=600,
             margin=dict(l=80, r=190, t=80, b=90),
-            paper_bgcolor="white",
-            plot_bgcolor="white",
+            paper_bgcolor=transparent_bg,
+            plot_bgcolor=transparent_bg,
         )
 
         display.plotly_chart(fig_pub, use_container_width=True)
@@ -293,8 +295,8 @@ def perform_analyze(
             ),
             height=540,
             margin=dict(l=220, r=90, t=80, b=90),
-            paper_bgcolor="white",
-            plot_bgcolor="white",
+            paper_bgcolor=transparent_bg,
+            plot_bgcolor=transparent_bg,
             showlegend=False,
         )
 
@@ -527,13 +529,16 @@ def perform_analyze(
     wc = WordCloud(
         width=1400,
         height=500,
-        background_color="white",
+        mode="RGBA",
+        background_color=None,
         colormap="Blues",
         prefer_horizontal=0.9,
         random_state=42,
     ).generate_from_frequencies(top20_topics.to_dict())
 
     fig_wc, ax = plt.subplots(figsize=(12, 4))
+    fig_wc.patch.set_alpha(0)
+    ax.set_facecolor("none")
     ax.imshow(wc, interpolation="bilinear")
     ax.axis("off")
     ax.set_title("Top 20 Topics — Word Cloud", fontsize=16)

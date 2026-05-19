@@ -85,4 +85,16 @@ Notes & next steps:
 
 ---
 
+Date: 2026-05-19
+Version: v0.1e
+
+Main activities:
+- Finalized caption emphasis styling so highlighted helper terms and links use the app cyan consistently and render in bold for readability across themes. (file: `app_lit_wg2.py`)
+- Fine-tuned yearly stacked chart presentation by moving the legend further right to reduce visual crowding near plot content. (file: `button_analyze.py`)
+
+Notes & next steps:
+- Recheck chart spacing on smaller screens to ensure the right-shifted legend remains fully visible.
+
+---
+
 Last updated: 2026-05-19
