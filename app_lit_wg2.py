@@ -157,34 +157,98 @@ def _write_feedback_to_notion(
         "Datetime": {"date": {"start": cet_now}},
     }
 
-    payload = {
-        "parent": {"database_id": database_id},
-        "properties": properties,
-    }
-
-    response = requests.post(
-        "https://api.notion.com/v1/pages",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Notion-Version": "2022-06-28",
-            "Content-Type": "application/json",
-        },
-        json=payload,
-        timeout=20,
+    ok, detail = _create_notion_page(
+        token=token,
+        database_id=database_id,
+        properties=properties,
     )
+    if not ok:
+        return False, f"Failed to submit feedback to Notion. Response detail: {detail}"
+
+    return True, "Thank you! Your feedback has been submitted."
+
+
+def _create_notion_page(
+    token: str,
+    database_id: str,
+    properties: dict,
+) -> tuple[bool, object]:
+    """Create a Notion page in the target database and return raw response detail on failure."""
+    try:
+        response = requests.post(
+            "https://api.notion.com/v1/pages",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Notion-Version": "2022-06-28",
+                "Content-Type": "application/json",
+            },
+            json={
+                "parent": {"database_id": database_id.strip()},
+                "properties": properties,
+            },
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        return False, f"Request error: {exc}"
+    except Exception as exc:
+        return False, f"Unexpected error: {exc}"
 
     if response.status_code >= 300:
         try:
-            error_detail = response.json()
+            return False, response.json()
         except ValueError:
-            error_detail = response.text
-        return (
-            False,
-            "Failed to submit feedback to Notion. Response detail: "
-            f"{error_detail}",
-        )
+            return False, response.text
 
-    return True, "Thank you! Your feedback has been submitted."
+    return True, "ok"
+
+
+def _write_search_log_to_notion(
+    keyword: str,
+    year_range: tuple[int, int],
+    work_types: list[str],
+    language: str,
+    member_state: str | None,
+    max_number: int,
+    returned_results: int,
+) -> tuple[bool, str]:
+    """Write one search event to the literature Notion database."""
+    token = os.getenv("NOTION_TOKEN")
+    database_id = os.getenv("literature_database_id")
+    if not token or not database_id:
+        return False, "Notion search-log credentials are missing in the environment."
+
+    keyword_clean = (keyword or "").strip()
+    title_keyword = keyword_clean or "No keyword"
+    title_keyword = title_keyword[:120]
+    title_value = f"Search: {title_keyword}"
+
+    publication_year_text = f"{year_range[0]}-{year_range[1]}"
+    type_text = ", ".join(work_types) if work_types else "Any"
+    language_text = language or "Any"
+    member_state_text = member_state or "All"
+    cet_now = datetime.now(ZoneInfo("Europe/Paris")).isoformat()
+
+    properties = {
+        "Name": {"title": [{"text": {"content": title_value}}]},
+        "Keyword": {"rich_text": [{"text": {"content": keyword_clean}}]},
+        "Publication year": {"rich_text": [{"text": {"content": publication_year_text}}]},
+        "Type": {"rich_text": [{"text": {"content": type_text}}]},
+        "Language": {"rich_text": [{"text": {"content": language_text}}]},
+        "UN member states": {"rich_text": [{"text": {"content": member_state_text}}]},
+        "Max Number": {"number": int(max_number)},
+        "Returned results": {"number": int(returned_results)},
+        "Datetime": {"date": {"start": cet_now}},
+    }
+
+    ok, detail = _create_notion_page(
+        token=token,
+        database_id=database_id,
+        properties=properties,
+    )
+    if not ok:
+        return False, f"Failed to write search log to Notion. Response detail: {detail}"
+
+    return True, "Search log saved to Notion."
 
 
 def render_feedback_page() -> None:
@@ -476,7 +540,7 @@ with help_col:
         "**AND**: requires all terms,  \n"
         "**OR**: allows either term,  \n"
         "**Parentheses**: group logic,  \n"
-        "**Quotes**: exact phrases,  \n"
+        "**Double quotes**: exact phrases,  \n"
         "**Notes**: Other operators are not supported at this moment. Please submit feedback using the feedback form if you need additional operators.  \n"
         "**Example**: \"climate change\" AND (water OR \"land use\") AND Bahamas.  \n"
         "**Reference**: [OpenAlex searching guide](https://developers.openalex.org/guides/searching)"
@@ -702,6 +766,22 @@ with btn_col:
             # Clear any cached analysis when a new search is run
             st.session_state.pop("last_analyze_triggered", None)
             st.session_state.pop("html_skipped_publications", None)
+
+            if result_payload:
+                try:
+                    log_ok, log_msg = _write_search_log_to_notion(
+                        keyword=keyword,
+                        year_range=year_range,
+                        work_types=work_types,
+                        language=language_option,
+                        member_state=selected_member_state,
+                        max_number=num_results,
+                        returned_results=int(result_payload.get("total") or 0),
+                    )
+                except Exception as exc:
+                    log_ok, log_msg = False, f"Failed to write search log to Notion: {exc}"
+                if not log_ok:
+                    st.warning(log_msg)
     with r1c2:
         if st.button(
             "Analyze Results",

@@ -97,4 +97,19 @@ Notes & next steps:
 
 ---
 
-Last updated: 2026-05-19
+Date: 2026-05-20
+Version: v0.1f
+
+Main activities:
+- Added search logging to Notion after each OpenAlex search, writing query/filter metadata and returned result count to the literature database configured in `.env`. (file: `app_lit_wg2.py`)
+- Refactored Notion writes so feedback and search logging use the same shared page-creation flow with consistent request headers/payload handling. (file: `app_lit_wg2.py`)
+- Added `Datetime` support for search logs and now write CET/Paris timestamp into the Notion date property. (file: `app_lit_wg2.py`)
+- Hardened search flow so failed Notion logging (API/network/exception) does not block or break search result return; failures are surfaced as warnings only. (file: `app_lit_wg2.py`)
+- Added a standalone Notion connectivity utility to validate env credentials/database reachability and optionally create a test page. (file: `test_notion_connection.py`)
+
+Notes & next steps:
+- If logging appears inconsistent during local dev, restart Streamlit after `.env` edits to avoid stale environment values in the running process.
+
+---
+
+Last updated: 2026-05-20
