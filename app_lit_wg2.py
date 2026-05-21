@@ -435,6 +435,24 @@ div[data-testid="stCaptionContainer"] a:active {
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-title"> Climate Literature Navigator </div>', unsafe_allow_html=True)
+st.markdown(
+    """
+    <div style="
+        background-color:#EAF4FF;
+        border:1px solid #BBDFFF;
+        border-radius:8px;
+        padding:12px 14px;
+        margin:8px 0 14px 0;
+        text-align:center;
+        font-weight:600;
+        font-size:17px;
+        color:#1F2D3D;
+    ">
+        ℹ️ Please first carefully read the information from the left sidebar before using the app.
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 st.markdown("<h3 style='text-align:center'>Settings 🛠️</h3>", unsafe_allow_html=True)
 
 # OpenAlex API control below title
@@ -593,12 +611,14 @@ with type_col2:
             "editorial",
             "erratum",
             "letter",
-            "monograph",
+            "libguides",
+            "other",
             "paratext",
             "peer-review",
             "preprint",
             "reference-entry",
             "report",
+            "retraction",
             "review",
             "standard",
             "supplementary-materials",

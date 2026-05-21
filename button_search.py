@@ -225,6 +225,7 @@ def perform_search(
     try:
         # Use provided container for rendering results to avoid extra spacing
         display = container if container is not None else st
+        had_connection_issue = False
 
         # clear previous results in the container if possible
         if container is not None:
@@ -315,6 +316,7 @@ def perform_search(
                     requested_n,
                 )
             except Exception:
+                had_connection_issue = True
                 all_results = []
 
             # Deduplicate overall and trim to requested total
@@ -340,7 +342,23 @@ def perform_search(
         return
 
     if not results:
-        display.warning("No results found")
+        connection_hint = (
+            "\n\n3. Connection problem: please refresh the app and try again."
+            if had_connection_issue
+            else "\n\n3. There could be occasional connection problems. In such cases, please refresh the app and try again. If the problem persists, it may be due to high traffic or temporary issues with the OpenAlex API. Please contact us via the feedback form from the left sidebar."
+        )
+        display.warning(
+            """
+No results were returned. This can happen when:
+
+1. Your search string and/or publication year range is too strict. Please loosen them and try again.
+
+2. Some terms used in scientific literature are less common in grey literature (for example, indigenous knowledge systems).
+
+3. Check the spelling of your keywords and use of boolean operators. The search supports AND/OR logic, parentheses, and double quoted phrases. For example: "climate change" AND (adaptation OR mitigation) AND "indigenous knowledge"`.
+"""
+            + connection_hint
+        )
         return None
 
     records = []
@@ -480,3 +498,4 @@ def perform_search(
         "shown": len(df_display),
         "summary": summary_text,
     }
+
