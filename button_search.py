@@ -88,7 +88,7 @@ def _matches_all_keywords(work: dict[str, Any], keywords_list: list[str]) -> boo
 
 def _tokenize_boolean_query(query: str) -> list[str]:
     """Tokenize a boolean expression supporting quotes, AND/OR, and parentheses."""
-    pattern = r'"[^"\\]*(?:\\.[^"\\]*)*"|\(|\)|\bAND\b|\bOR\b|[^\s()]+'
+    pattern = r'"[^"\\]*(?:\\.[^"\\]*)*"|\(|\)|,|;|\bAND\b|\bOR\b|[^\s(),;]+'
     return [t for t in re.findall(pattern, query, flags=re.IGNORECASE) if t.strip()]
 
 
