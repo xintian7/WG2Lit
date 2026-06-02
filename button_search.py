@@ -203,6 +203,17 @@ def normalize_keyword_query(query: str) -> tuple[str, bool, str]:
     if not raw_query:
         return raw_query, False, ""
 
+    converted_plain_and = False
+    if (
+        '"' not in raw_query
+        and not re.search(r"\b(AND|OR)\b", raw_query)
+        and re.search(r"\band\b", raw_query)
+    ):
+        parts = re.split(r"\band\b", raw_query, maxsplit=1)
+        if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+            raw_query = f"{parts[0].strip()} AND {parts[1].strip()}"
+            converted_plain_and = True
+
     tokens = _tokenize_boolean_query(raw_query)
     if not tokens:
         return raw_query, False, ""
@@ -210,6 +221,12 @@ def normalize_keyword_query(query: str) -> tuple[str, bool, str]:
     corrected_tokens: list[str] = []
     phrase_terms: list[str] = []
     quoted_phrases: list[str] = []
+    grouped_or_chain = False
+
+    def is_boolean_operator(token: str) -> bool:
+        # Treat only uppercase AND/OR as Boolean operators to avoid rewriting
+        # natural-language phrases like "climate change and ...".
+        return token in ("AND", "OR")
 
     def flush_phrase() -> None:
         nonlocal phrase_terms
@@ -224,14 +241,13 @@ def normalize_keyword_query(query: str) -> tuple[str, bool, str]:
         phrase_terms = []
 
     for tok in tokens:
-        upper = tok.upper()
         if tok in (",", ";"):
             # Treat separators as delimiters between terms.
             flush_phrase()
             continue
-        if tok in ("(", ")") or upper in ("AND", "OR"):
+        if tok in ("(", ")") or is_boolean_operator(tok):
             flush_phrase()
-            corrected_tokens.append(upper if upper in ("AND", "OR") else tok)
+            corrected_tokens.append(tok)
             continue
 
         if len(tok) >= 2 and tok[0] == '"' and tok[-1] == '"':
@@ -247,7 +263,7 @@ def normalize_keyword_query(query: str) -> tuple[str, bool, str]:
     inserted_and_count = 0
 
     def is_operand(token: str) -> bool:
-        return token not in ("(", ")") and token.upper() not in ("AND", "OR")
+        return token not in ("(", ")") and not is_boolean_operator(token)
 
     for index, token in enumerate(corrected_tokens):
         if index > 0:
@@ -256,6 +272,58 @@ def normalize_keyword_query(query: str) -> tuple[str, bool, str]:
                 final_tokens.append("AND")
                 inserted_and_count += 1
         final_tokens.append(token)
+
+    def group_or_chain_after_and(tokens_list: list[str]) -> tuple[list[str], bool]:
+        """Wrap RHS OR chains after AND: A AND B OR C -> A AND (B OR C)."""
+        out: list[str] = []
+        i = 0
+        changed = False
+
+        while i < len(tokens_list):
+            token = tokens_list[i]
+            if token != "AND":
+                out.append(token)
+                i += 1
+                continue
+
+            out.append("AND")
+            rhs_start = i + 1
+            if rhs_start >= len(tokens_list):
+                i += 1
+                continue
+            # Already grouped.
+            if tokens_list[rhs_start] == "(":
+                i += 1
+                continue
+
+            rhs_end = rhs_start
+            saw_or = False
+            simple_chain = True
+            while rhs_end < len(tokens_list):
+                current = tokens_list[rhs_end]
+                if current in ("(", ")"):
+                    simple_chain = False
+                    break
+                if current == "OR":
+                    saw_or = True
+                if current == "AND" and rhs_end > rhs_start:
+                    break
+                rhs_end += 1
+
+            segment = tokens_list[rhs_start:rhs_end]
+            if simple_chain and saw_or and segment:
+                out.append("(")
+                out.extend(segment)
+                out.append(")")
+                changed = True
+                i = rhs_end
+                continue
+
+            i += 1
+
+        return out, changed
+
+    final_tokens, grouped_or_chain = group_or_chain_after_and(final_tokens)
 
     corrected_query = " ".join(final_tokens).strip()
     needs_review = " ".join(raw_query.split()) != " ".join(corrected_query.split())
@@ -271,6 +339,10 @@ def normalize_keyword_query(query: str) -> tuple[str, bool, str]:
         )
     if inserted_and_count:
         explanation_parts.append("Inserted explicit AND between adjacent terms.")
+    if grouped_or_chain:
+        explanation_parts.append("Grouped OR terms with parentheses after AND for clearer Boolean logic.")
+    if converted_plain_and:
+        explanation_parts.append("Converted plain-language 'and' into Boolean AND for keyword combination.")
 
     if not explanation_parts:
         explanation_parts.append("Adjusted the keyword syntax to match Boolean search rules.")

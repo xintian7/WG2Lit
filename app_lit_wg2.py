@@ -134,6 +134,7 @@ def _get_query_param(param_name: str) -> str | None:
 
 def _run_keyword_search(
     keyword_value: str,
+    original_keyword: str,
     year_range: tuple[int, int],
     num_results: int,
     work_types: list[str],
@@ -168,7 +169,8 @@ def _run_keyword_search(
     if result_payload:
         try:
             log_ok, log_msg = _write_search_log_to_notion(
-                keyword=keyword_value,
+                original_keyword=original_keyword,
+                used_keyword=keyword_value,
                 year_range=year_range,
                 work_types=work_types,
                 language=language_label,
@@ -296,7 +298,8 @@ def _create_notion_page(
 
 
 def _write_search_log_to_notion(
-    keyword: str,
+    original_keyword: str,
+    used_keyword: str,
     year_range: tuple[int, int],
     work_types: list[str],
     language: str,
@@ -310,8 +313,10 @@ def _write_search_log_to_notion(
     if not token or not database_id:
         return False, "Notion search-log credentials are missing in the environment."
 
-    keyword_clean = (keyword or "").strip()
-    title_keyword = keyword_clean or "No keyword"
+    original_keyword_clean = (original_keyword or "").strip()
+    used_keyword_clean = (used_keyword or "").strip()
+
+    title_keyword = original_keyword_clean or "No keyword"
     title_keyword = title_keyword[:120]
     title_value = f"Search: {title_keyword}"
 
@@ -323,7 +328,7 @@ def _write_search_log_to_notion(
 
     properties = {
         "Name": {"title": [{"text": {"content": title_value}}]},
-        "Keyword": {"rich_text": [{"text": {"content": keyword_clean}}]},
+        "Keyword": {"rich_text": [{"text": {"content": used_keyword_clean}}]},
         "Publication year": {"rich_text": [{"text": {"content": publication_year_text}}]},
         "Type": {"rich_text": [{"text": {"content": type_text}}]},
         "Language": {"rich_text": [{"text": {"content": language_text}}]},
@@ -890,6 +895,7 @@ with btn_col:
                 st.session_state.pop("keyword_search_decision", None)
                 _run_keyword_search(
                     normalized_keyword,
+                    keyword,
                     year_range,
                     num_results,
                     work_types,
@@ -944,6 +950,7 @@ with btn_col:
         did_search = True
         _run_keyword_search(
             request_keyword,
+            pending_request.get("keyword", request_keyword),
             pending_request.get("year_range", year_range),
             pending_request.get("num_results", num_results),
             pending_request.get("work_types", work_types),
