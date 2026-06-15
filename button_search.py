@@ -1,5 +1,6 @@
 import json
 import re
+import time
 from typing import Any
 
 import pandas as pd
@@ -382,6 +383,8 @@ def perform_search(
         # Use provided container for rendering results to avoid extra spacing
         display = container if container is not None else st
         had_connection_issue = False
+        connection_error_detail = ""
+        connection_error_status: int | None = None
 
         # clear previous results in the container if possible
         if container is not None:
@@ -417,18 +420,52 @@ def perform_search(
             requested_n = max(int(num_results), 1)
             openalex_total = 0
 
+            def _request_openalex(params: dict[str, Any], *, timeout: int = 30) -> requests.Response:
+                """Send an OpenAlex request with retries for transient failures."""
+                max_attempts = 3
+                last_exc: Exception | None = None
+                for attempt in range(1, max_attempts + 1):
+                    try:
+                        response = requests.get(
+                            "https://api.openalex.org/works",
+                            params=params,
+                            timeout=timeout,
+                        )
+                        # Retry only on transient status codes.
+                        if response.status_code in (429, 500, 502, 503, 504):
+                            if attempt < max_attempts:
+                                time.sleep(0.6 * attempt)
+                                continue
+                        response.raise_for_status()
+                        return response
+                    except requests.RequestException as exc:
+                        last_exc = exc
+                        if attempt < max_attempts:
+                            time.sleep(0.6 * attempt)
+                            continue
+                        raise
+                if last_exc:
+                    raise last_exc
+                raise RuntimeError("OpenAlex request failed without exception detail.")
+
+            def _extract_status_code(exc: Exception) -> int | None:
+                """Extract HTTP status code from a requests exception when available."""
+                response = getattr(exc, "response", None)
+                if response is None:
+                    return None
+                status_code = getattr(response, "status_code", None)
+                return int(status_code) if isinstance(status_code, int) else None
+
             def _fetch_paginated(params: dict[str, Any], limit: int) -> list[dict[str, Any]]:
                 """Fetch up to `limit` records across multiple OpenAlex pages."""
                 page_size = min(OPENALEX_PAGE_SIZE, 100)
                 page = 1
                 collected: list[dict[str, Any]] = []
                 while len(collected) < limit:
-                    response = requests.get(
-                        "https://api.openalex.org/works",
-                        params={**params, "per_page": page_size, "page": page},
+                    response = _request_openalex(
+                        {**params, "per_page": page_size, "page": page},
                         timeout=30,
                     )
-                    response.raise_for_status()
                     batch = (response.json() or {}).get("results") or []
                     if not batch:
                         break
@@ -456,24 +493,61 @@ def perform_search(
 
             query_params = _apply_sort(base_params)
 
-            try:
+            def _fetch_results_with_count(params: dict[str, Any], limit: int) -> tuple[list[dict[str, Any]], int]:
+                total = 0
                 try:
-                    count_response = requests.get(
-                        "https://api.openalex.org/works",
-                        params={**query_params, "per_page": 1},
+                    count_response = _request_openalex(
+                        {**params, "per_page": 1},
                         timeout=30,
                     )
-                    count_response.raise_for_status()
-                    openalex_total = int((count_response.json() or {}).get("meta", {}).get("count") or 0)
+                    total = int((count_response.json() or {}).get("meta", {}).get("count") or 0)
                 except Exception:
-                    openalex_total = 0
-                all_results = _fetch_paginated(
-                    query_params,
-                    requested_n,
-                )
-            except Exception:
+                    total = 0
+                results_list = _fetch_paginated(params, limit)
+                return results_list, total
+
+            try:
+                all_results, openalex_total = _fetch_results_with_count(query_params, requested_n)
+            except Exception as exc:
                 had_connection_issue = True
+                connection_error_detail = str(exc)
+                connection_error_status = _extract_status_code(exc)
                 all_results = []
+
+                # Fallback: for plain multi-word queries, retry with quoted phrase.
+                is_plain_phrase = (
+                    not use_semantic_search
+                    and " " in keyword_expr
+                    and '"' not in keyword_expr
+                    and not re.search(r"\b(AND|OR)\b", keyword_expr)
+                    and "(" not in keyword_expr
+                    and ")" not in keyword_expr
+                )
+                if is_plain_phrase:
+                    fallback_filter_parts = [
+                        f"{search_field}:\"{keyword_expr}\"",
+                        f"from_publication_date:{start_year}-01-01",
+                        f"to_publication_date:{end_year}-12-31",
+                    ]
+                    if language:
+                        fallback_filter_parts.append(f"language:{language}")
+                    if institution_country_code:
+                        fallback_filter_parts.append(f"institutions.country_code:{institution_country_code}")
+                    if is_global_south:
+                        fallback_filter_parts.append("institutions.is_global_south:true")
+                    if work_types:
+                        types_to_query = work_types[:MAX_WORK_TYPES]
+                        fallback_filter_parts.append(f"type:{'|'.join(types_to_query)}")
+
+                    fallback_params = _apply_sort({"filter": ",".join(fallback_filter_parts)})
+                    try:
+                        all_results, openalex_total = _fetch_results_with_count(fallback_params, requested_n)
+                        had_connection_issue = False
+                        connection_error_detail = ""
+                        connection_error_status = None
+                    except Exception as fallback_exc:
+                        connection_error_detail = str(fallback_exc)
+                        connection_error_status = _extract_status_code(fallback_exc)
 
             # Deduplicate overall and trim to requested total
             seen = set()
@@ -503,6 +577,11 @@ def perform_search(
             if had_connection_issue
             else "\n\n3. There could be occasional connection problems. In such cases, please refresh the app and try again. If the problem persists, it may be due to high traffic or temporary issues with the OpenAlex API. Please contact us via the feedback form from the left sidebar."
         )
+        if had_connection_issue and connection_error_status in {500, 502, 503}:
+            connection_hint += (
+                f"\n\nOpenAlex server returned HTTP {connection_error_status}. "
+                "This is likely temporary. Please try again in a moment."
+            )
         display.warning(
             """
 No results were returned. This can happen when:
