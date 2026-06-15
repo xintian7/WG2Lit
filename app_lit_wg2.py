@@ -76,6 +76,135 @@ def _payload_after_skips(payload: dict | None) -> dict | None:
     return filtered_payload
 
 
+def _bibtex_escape(value: object) -> str:
+    """Escape BibTeX-sensitive characters in field values."""
+    text = str(value or "")
+    text = text.replace("\\", "\\\\")
+    text = text.replace("{", "\\{").replace("}", "\\}")
+    return text
+
+
+def _build_bibtex_key(record: dict, used_keys: set[str], index: int) -> str:
+    """Build a deterministic, unique BibTeX key for one record."""
+    authors_raw = str(record.get("Authors") or "").strip()
+    first_author = authors_raw.split(",")[0].strip() if authors_raw else "unknown"
+    first_author_token = "".join(ch for ch in first_author.split(" ")[-1].lower() if ch.isalnum()) or "unknown"
+
+    year = str(record.get("Publication Year") or "n.d.").strip() or "n.d."
+
+    title = str(record.get("Title") or "").strip().lower()
+    first_word = ""
+    for token in title.split():
+        cleaned = "".join(ch for ch in token if ch.isalnum())
+        if cleaned:
+            first_word = cleaned
+            break
+    if not first_word:
+        first_word = f"item{index}"
+
+    base_key = f"{first_author_token}{year}{first_word}"
+    key = base_key
+    suffix = 1
+    while key in used_keys:
+        suffix += 1
+        key = f"{base_key}{suffix}"
+    used_keys.add(key)
+    return key
+
+
+def _record_to_bibtex_entry(record: dict, used_keys: set[str], index: int) -> str:
+    """Convert one result record to a BibTeX entry string."""
+    work_type = str(record.get("Type") or "").strip().lower()
+    entry_type_map = {
+        "article": "article",
+        "book": "book",
+        "book-chapter": "incollection",
+        "dataset": "misc",
+        "dissertation": "phdthesis",
+        "preprint": "unpublished",
+        "report": "techreport",
+    }
+    entry_type = entry_type_map.get(work_type, "misc")
+
+    key = _build_bibtex_key(record, used_keys, index)
+
+    authors = [a.strip() for a in str(record.get("Authors") or "").split(",") if a.strip()]
+    bib_authors = " and ".join(_bibtex_escape(a) for a in authors)
+
+    fields: list[tuple[str, str]] = []
+
+    title = str(record.get("Title") or "").strip()
+    if title:
+        fields.append(("title", "{" + _bibtex_escape(title) + "}"))
+
+    if bib_authors:
+        fields.append(("author", "{" + bib_authors + "}"))
+
+    year = str(record.get("Publication Year") or "").strip()
+    if year:
+        fields.append(("year", "{" + _bibtex_escape(year) + "}"))
+
+    journal = str(record.get("Journal") or "").strip()
+    if journal:
+        journal_field = "journal" if entry_type == "article" else "booktitle"
+        fields.append((journal_field, "{" + _bibtex_escape(journal) + "}"))
+
+    publisher = str(record.get("Publisher") or "").strip()
+    if publisher:
+        fields.append(("publisher", "{" + _bibtex_escape(publisher) + "}"))
+
+    doi = str(record.get("DOI") or "").strip()
+    if doi:
+        fields.append(("doi", "{" + _bibtex_escape(doi) + "}"))
+
+    url = str(record.get("URL") or record.get("OpenAlex URL") or "").strip()
+    if url:
+        fields.append(("url", "{" + _bibtex_escape(url) + "}"))
+
+    abstract = str(record.get("Abstract") or "").strip()
+    if abstract:
+        fields.append(("abstract", "{" + _bibtex_escape(abstract) + "}"))
+
+    keywords = str(record.get("Keywords") or "").strip()
+    if keywords:
+        fields.append(("keywords", "{" + _bibtex_escape(keywords) + "}"))
+
+    body = ",\n".join(f"  {name} = {value}" for name, value in fields)
+    return f"@{entry_type}{{{key},\n{body}\n}}"
+
+
+def _payload_to_bibtex(payload: dict | None) -> bytes:
+    """Build a BibTeX file content from the cached payload records."""
+    if not payload:
+        return b""
+
+    raw_json = payload.get("json")
+    if raw_json is None:
+        return b""
+
+    if isinstance(raw_json, (bytes, bytearray)):
+        raw_json = raw_json.decode("utf-8", errors="ignore")
+
+    try:
+        records = json.loads(raw_json)
+    except Exception:
+        return b""
+
+    if not isinstance(records, list) or not records:
+        return b""
+
+    used_keys: set[str] = set()
+    entries = [
+        _record_to_bibtex_entry(rec, used_keys, idx)
+        for idx, rec in enumerate(records, start=1)
+        if isinstance(rec, dict)
+    ]
+    bib_text = "\n\n".join(entries).strip()
+    if not bib_text:
+        return b""
+    return (bib_text + "\n").encode("utf-8")
+
+
 def render_text_document_page(doc_key: str) -> None:
     """Render a markdown document from assets based on the selected key."""
     docs = {
@@ -430,9 +559,11 @@ div.stButton > button[kind="primary"] {
     background-color: #1f77b4;
     color: #ffffff;
     border: 1px solid #1f77b4;
-    min-height: 48px;
-    padding: 0.5rem 1.25rem;
-    white-space: nowrap;
+    min-height: 52px;
+    padding: 0.45rem 0.9rem;
+    white-space: normal;
+    line-height: 1.2;
+    font-size: 0.92rem;
     text-align: center;
     display: flex;
     justify-content: center;
@@ -447,9 +578,11 @@ div.stButton > button[kind="secondary"] {
     background-color: #a3a3a3;
     color: #ffffff;
     border: 1px solid #a3a3a3;
-    min-height: 48px;
-    padding: 0.5rem 1.25rem;
-    white-space: nowrap;
+    min-height: 52px;
+    padding: 0.45rem 0.9rem;
+    white-space: normal;
+    line-height: 1.2;
+    font-size: 0.92rem;
     text-align: center;
     display: flex;
     justify-content: center;
@@ -471,9 +604,11 @@ div.stDownloadButton > button {
     background-color: #1f77b4;
     color: #ffffff;
     border: 1px solid #1f77b4;
-    min-height: 48px;
-    padding: 0.5rem 1.25rem;
-    white-space: nowrap;
+    min-height: 52px;
+    padding: 0.45rem 0.9rem;
+    white-space: normal;
+    line-height: 1.2;
+    font-size: 0.92rem;
     text-align: center;
     display: flex;
     justify-content: center;
@@ -561,7 +696,7 @@ with input_col:
     openalex_api = st.text_input(
         "",
         value="",
-        placeholder="Placeholder for a future version (currently not required for version 0.1a)",
+        placeholder="Placeholder for a future version (currently not required for version 0.5)",
         label_visibility="collapsed",
         key="openalex_api_input",
     )
@@ -585,7 +720,7 @@ with input_col:
 with st.sidebar:
     st.header("About")
     st.markdown(
-        "<span style='color: #00a9cf; font-weight: bold;'>Climate Literature Navigator</span> (ver 0.1) "
+        "<span style='color: #00a9cf; font-weight: bold;'>Climate Literature Navigator</span> (ver 0.2) "
         "is a web app developed by the <a href='https://www.ipcc.ch/working-group/wg2/'>IPCC WGII</a> TSU to help IPCC authors find climate-related literature from <a href='https://openalex.org'>OpenAlex</a>'s database. "
         "Please contact tsu@ipccwg2.org if you have any questions or suggestions.",
         unsafe_allow_html=True
@@ -624,7 +759,8 @@ with st.sidebar:
     )
 
     st.sidebar.markdown("### To-do")
-    st.sidebar.checkbox("General maintenance after LAM2 (v0.1b)", value=False, key="todo_auth_gs")
+    st.sidebar.checkbox("General maintenance after LAM2 (v0.1b)", value=True, key="todo_auth_gs")
+    st.sidebar.checkbox("Zotero integration (v0.2)", value=True, key="todo_zotero")
     st.sidebar.checkbox("Add multi-page tabs (v0.2)", value=False, key="todo_multi_page")
     st.sidebar.checkbox("Add more databases, e.g. Scopus, Overton, CORE, ReliefWeb (v0.3)", value=False, key="todo_search_sources")
     st.sidebar.checkbox("Add cloud-based features (v0.4)", value=False, key="todo_cloud")
@@ -852,7 +988,7 @@ results_container = st.container()
 analyze_container = st.container()
 
 # Center the buttons under the controls
-_, btn_col, _ = st.columns([1, 4, 1])
+_, btn_col, _ = st.columns([0.8, 4.4, 0.8])
 with btn_col:
     did_search = False
     did_analyze = False
@@ -970,8 +1106,9 @@ with btn_col:
 
     payload = st.session_state.get("last_payload")
     payload_for_download = _payload_after_skips(payload)
+    bibtex_payload = _payload_to_bibtex(payload_for_download)
 
-    # Row 2: CSV (2-1), JSON (2-2), Neo4j placeholder (2-3)
+    # Row 2: CSV (2-1), JSON (2-2), BibTeX (2-3)
     r2c1, r2c2, r2c3 = st.columns([2, 2, 2])
     with r2c1:
         if payload_for_download:
@@ -1014,6 +1151,29 @@ with btn_col:
                 use_container_width=True,
             )
     with r2c3:
+        if bibtex_payload:
+            st.download_button(
+                "Download BibTex (for Zotero)",
+                data=bibtex_payload,
+                file_name="openalex_results.bib",
+                mime="application/x-bibtex",
+                key="download_bibtex_button",
+                use_container_width=True,
+            )
+        else:
+            st.download_button(
+                "Download BibTex (for Zotero)",
+                data=b"",
+                file_name="openalex_results.bib",
+                mime="application/x-bibtex",
+                key="download_bibtex_button_disabled",
+                disabled=True,
+                use_container_width=True,
+            )
+
+    # Row 3: Neo4j (3-1), empty (3-2), empty (3-3)
+    r3c1, r3c2, r3c3 = st.columns([2, 2, 2])
+    with r3c1:
         if payload_for_download:
             neo4j_cypher = build_neo4j_cypher(payload_for_download)
             st.download_button(
@@ -1034,6 +1194,10 @@ with btn_col:
                 disabled=True,
                 use_container_width=True,
             )
+    with r3c2:
+        st.write("")
+    with r3c3:
+        st.write("")
 
 st.divider()
 st.markdown("<h3 style='text-align:center'>Literature Review & Export 📑</h3>", unsafe_allow_html=True)

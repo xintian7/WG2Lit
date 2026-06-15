@@ -112,4 +112,20 @@ Notes & next steps:
 
 ---
 
-Last updated: 2026-05-20
+Date: 2026-06-15
+Version: v0.2a
+
+Main activities:
+- Added BibTeX export generation from cached search results and enabled direct `.bib` download for Zotero import. (file: `app_lit_wg2.py`)
+- Added a new download action button labeled "Download BibTex (for Zotero)" in row 2, column 3 of the export controls. (file: `app_lit_wg2.py`)
+- Reorganized export action layout so Neo4j download is placed on row 3, column 1. (file: `app_lit_wg2.py`)
+- Updated button styling for long labels to improve readability: adjusted height/padding/font and enabled line wrapping for button text. (file: `app_lit_wg2.py`)
+- Widened the central action-button container to give each button more horizontal space and reduce text clipping. (file: `app_lit_wg2.py`)
+
+Notes & next steps:
+- Verify BibTeX import on Zotero with a mixed sample (article/report/book-chapter) and confirm field mapping quality (author, journal/booktitle, DOI, URL).
+- If desired, align all visible version strings/placeholders in the UI with `v0.2a` for release consistency.
+
+---
+
+Last updated: 2026-06-15
