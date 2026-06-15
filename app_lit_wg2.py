@@ -987,14 +987,13 @@ results_container = st.container()
 # Container for analysis output (heatmap etc.)
 analyze_container = st.container()
 
-# Center the buttons under the controls
-_, btn_col, _ = st.columns([0.8, 4.4, 0.8])
-with btn_col:
+# Button grid (4 columns per row)
+with st.container():
     did_search = False
     did_analyze = False
 
-    # Row 1: Search (1-1), Analyze (1-2), empty (1-3)
-    r1c1, r1c2, r1c3 = st.columns([2, 2, 2])
+    # Row 1: Search (1-1), Analyze (1-2), Clear (1-3), empty (1-4)
+    r1c1, r1c2, r1c3, r1c4 = st.columns(4)
     with r1c1:
         if st.button(
             "Search OpenAlex",
@@ -1069,6 +1068,8 @@ with btn_col:
             st.session_state.pop("last_analyze_triggered", None)
             analyze_container.empty()
             st.rerun()
+    with r1c4:
+        st.write("")
 
     pending_review = st.session_state.get("keyword_search_review")
     pending_request = st.session_state.get("keyword_search_request")
@@ -1108,8 +1109,8 @@ with btn_col:
     payload_for_download = _payload_after_skips(payload)
     bibtex_payload = _payload_to_bibtex(payload_for_download)
 
-    # Row 2: CSV (2-1), JSON (2-2), BibTeX (2-3)
-    r2c1, r2c2, r2c3 = st.columns([2, 2, 2])
+    # Row 2: CSV (2-1), JSON (2-2), BibTeX (2-3), Neo4j (2-4)
+    r2c1, r2c2, r2c3, r2c4 = st.columns(4)
     with r2c1:
         if payload_for_download:
             st.download_button(
@@ -1170,10 +1171,7 @@ with btn_col:
                 disabled=True,
                 use_container_width=True,
             )
-
-    # Row 3: Neo4j (3-1), empty (3-2), empty (3-3)
-    r3c1, r3c2, r3c3 = st.columns([2, 2, 2])
-    with r3c1:
+    with r2c4:
         if payload_for_download:
             neo4j_cypher = build_neo4j_cypher(payload_for_download)
             st.download_button(
@@ -1194,10 +1192,6 @@ with btn_col:
                 disabled=True,
                 use_container_width=True,
             )
-    with r3c2:
-        st.write("")
-    with r3c3:
-        st.write("")
 
 st.divider()
 st.markdown("<h3 style='text-align:center'>Literature Review & Export 📑</h3>", unsafe_allow_html=True)
