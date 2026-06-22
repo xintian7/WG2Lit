@@ -806,7 +806,7 @@ with kw_col2:
         "Semantic search",
         value=False,
         key="semantic_search",
-        help="If checked, use semantic search (broader matching). If unchecked, use regular Boolean search (more precise matching). Reference: https://developers.openalex.org/guides/semantic-search",
+        help="If checked, use semantic search (broader, AI-powered matching). If unchecked, use regular Boolean search (more precise, keyword-based). Note: Semantic search does not support country/institution filters. Reference: https://developers.openalex.org/guides/semantic-search",
     )
 
 # Publication year: label+help line, then slider line

@@ -396,26 +396,42 @@ def perform_search(
             return
 
         with st.spinner("Searching..."):
-            # Align with OpenAlex UI behavior by querying title+abstract directly.
-            search_field = "semantic.search" if use_semantic_search else "title_and_abstract.search"
-            filter_parts = [
-                f"{search_field}:{keyword_expr}",
-                f"from_publication_date:{start_year}-01-01",
-                f"to_publication_date:{end_year}-12-31",
-            ]
-            if language:
-                filter_parts.append(f"language:{language}")
-            if institution_country_code:
-                filter_parts.append(f"institutions.country_code:{institution_country_code}")
-            if is_global_south:
-                filter_parts.append("institutions.is_global_south:true")
-            if work_types:
-                types_to_query = work_types[:MAX_WORK_TYPES]
-                filter_parts.append(f"type:{'|'.join(types_to_query)}")
-
-            base_params: dict[str, Any] = {
-                "filter": ",".join(filter_parts),
-            }
+            # OpenAlex semantic search uses search.semantic as a query parameter, not a filter.
+            # Regular search uses title_and_abstract.search as a filter.
+            # Semantic search has strict filter limitations (doesn't support date filters or country_code).
+            # Use publication_year range format for semantic search.
+            base_params: dict[str, Any] = {}
+            
+            if use_semantic_search:
+                # Semantic search with restricted filter set
+                base_params["search.semantic"] = keyword_expr
+                filter_parts = [
+                    f"publication_year:{start_year}-{end_year}",
+                ]
+                if language:
+                    filter_parts.append(f"language:{language}")
+                if work_types:
+                    types_to_query = work_types[:MAX_WORK_TYPES]
+                    filter_parts.append(f"type:{'|'.join(types_to_query)}")
+            else:
+                # Regular search with full filter support
+                filter_parts = [
+                    f"title_and_abstract.search:{keyword_expr}",
+                    f"from_publication_date:{start_year}-01-01",
+                    f"to_publication_date:{end_year}-12-31",
+                ]
+                if language:
+                    filter_parts.append(f"language:{language}")
+                if institution_country_code:
+                    filter_parts.append(f"institutions.country_code:{institution_country_code}")
+                if is_global_south:
+                    filter_parts.append("institutions.is_global_south:true")
+                if work_types:
+                    types_to_query = work_types[:MAX_WORK_TYPES]
+                    filter_parts.append(f"type:{'|'.join(types_to_query)}")
+            
+            if filter_parts:
+                base_params["filter"] = ",".join(filter_parts)
 
             requested_n = max(int(num_results), 1)
             openalex_total = 0
@@ -495,15 +511,34 @@ def perform_search(
 
             def _fetch_results_with_count(params: dict[str, Any], limit: int) -> tuple[list[dict[str, Any]], int]:
                 total = 0
-                try:
-                    count_response = _request_openalex(
-                        {**params, "per_page": 1},
-                        timeout=30,
-                    )
-                    total = int((count_response.json() or {}).get("meta", {}).get("count") or 0)
-                except Exception:
-                    total = 0
-                results_list = _fetch_paginated(params, limit)
+                results_list = []
+                
+                # For semantic search: only make ONE request due to 1 req/sec rate limit
+                # Get results directly without a separate count request
+                if use_semantic_search:
+                    try:
+                        response = _request_openalex(
+                            {**params, "per_page": min(limit, 50)},  # Semantic search max is 50
+                            timeout=30,
+                        )
+                        data = response.json() or {}
+                        total = int(data.get("meta", {}).get("count") or 0)
+                        results_list = data.get("results") or []
+                    except Exception:
+                        total = 0
+                        results_list = []
+                else:
+                    # For regular search: make count request first, then results request
+                    try:
+                        count_response = _request_openalex(
+                            {**params, "per_page": 1},
+                            timeout=30,
+                        )
+                        total = int((count_response.json() or {}).get("meta", {}).get("count") or 0)
+                    except Exception:
+                        total = 0
+                    results_list = _fetch_paginated(params, limit)
+                
                 return results_list, total
 
             try:
@@ -525,7 +560,7 @@ def perform_search(
                 )
                 if is_plain_phrase:
                     fallback_filter_parts = [
-                        f"{search_field}:\"{keyword_expr}\"",
+                        f"title_and_abstract.search:\"{keyword_expr}\"",
                         f"from_publication_date:{start_year}-01-01",
                         f"to_publication_date:{end_year}-12-31",
                     ]
