@@ -2,24 +2,25 @@ import streamlit as st
 from pathlib import Path
 import json
 import os
-from datetime import datetime
-from zoneinfo import ZoneInfo
 import pandas as pd
-import requests
 from dotenv import load_dotenv
 from typing import Any
 
-from button_search import normalize_keyword_query, perform_search
-from button_analyze import perform_analyze
-from button_neo4j import build_neo4j_cypher
-from button_html import render_html_preview
-from utils import (
-    record_identifier,
+from features.search.search import normalize_keyword_query, perform_search
+from features.analyze.analyze import perform_analyze
+from features.graph.neo4j_export import build_neo4j_cypher
+from features.preview.html_preview import render_html_preview
+from services.notion_logging_service import (
+    write_feedback_to_notion,
+    write_search_log_to_notion,
+)
+from core.constants import (
     DISPLAY_CONTAINER_HEIGHT,
     MAX_WORK_TYPES,
     UN_MEMBER_STATES,
     UN_MEMBER_STATE_TO_COUNTRY_CODE,
 )
+from utils import record_identifier
 
 
 load_dotenv()
@@ -297,7 +298,7 @@ def _run_keyword_search(
 
     if result_payload:
         try:
-            log_ok, log_msg = _write_search_log_to_notion(
+            log_ok, log_msg = write_search_log_to_notion(
                 original_keyword=original_keyword,
                 used_keyword=keyword_value,
                 year_range=year_range,
@@ -355,129 +356,6 @@ def _keyword_correction_dialog(review: dict[str, str]) -> None:
             st.rerun()
 
 
-def _write_feedback_to_notion(
-    name: str,
-    chapter: str,
-    email: str,
-    message: str,
-    contact_ok: bool,
-) -> tuple[bool, str]:
-    token = os.getenv("NOTION_TOKEN")
-    database_id = os.getenv("DATABASE_ID")
-    if not token or not database_id:
-        return False, "Notion credentials are missing in the environment."
-
-    title_value = name.strip() or "Feedback"
-    email_value = email.strip() if email.strip() else None
-    cet_now = datetime.now(ZoneInfo("Europe/Paris")).isoformat()
-    properties = {
-        "Title": {"title": [{"text": {"content": title_value}}]},
-        "App name": {"rich_text": [{"text": {"content": "Literature"}}]},
-        "Name": {"rich_text": [{"text": {"content": name}}]},
-        "Chapter": {"rich_text": [{"text": {"content": chapter}}]},
-        "Email": {"email": email_value},
-        "Question or Suggestion": {"rich_text": [{"text": {"content": message}}]},
-        "Further Contact": {"rich_text": [{"text": {"content": "Yes" if contact_ok else "No"}}]},
-        "Datetime": {"date": {"start": cet_now}},
-    }
-
-    ok, detail = _create_notion_page(
-        token=token,
-        database_id=database_id,
-        properties=properties,
-    )
-    if not ok:
-        return False, f"Failed to submit feedback to Notion. Response detail: {detail}"
-
-    return True, "Thank you! Your feedback has been submitted."
-
-
-def _create_notion_page(
-    token: str,
-    database_id: str,
-    properties: dict,
-) -> tuple[bool, object]:
-    """Create a Notion page in the target database and return raw response detail on failure."""
-    try:
-        response = requests.post(
-            "https://api.notion.com/v1/pages",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Notion-Version": "2022-06-28",
-                "Content-Type": "application/json",
-            },
-            json={
-                "parent": {"database_id": database_id.strip()},
-                "properties": properties,
-            },
-            timeout=20,
-        )
-    except requests.RequestException as exc:
-        return False, f"Request error: {exc}"
-    except Exception as exc:
-        return False, f"Unexpected error: {exc}"
-
-    if response.status_code >= 300:
-        try:
-            return False, response.json()
-        except ValueError:
-            return False, response.text
-
-    return True, "ok"
-
-
-def _write_search_log_to_notion(
-    original_keyword: str,
-    used_keyword: str,
-    year_range: tuple[int, int],
-    work_types: list[str],
-    language: str,
-    member_state: str | None,
-    max_number: int,
-    returned_results: int,
-) -> tuple[bool, str]:
-    """Write one search event to the literature Notion database."""
-    token = os.getenv("NOTION_TOKEN")
-    database_id = os.getenv("literature_database_id")
-    if not token or not database_id:
-        return False, "Notion search-log credentials are missing in the environment."
-
-    original_keyword_clean = (original_keyword or "").strip()
-    used_keyword_clean = (used_keyword or "").strip()
-
-    title_keyword = original_keyword_clean or "No keyword"
-    title_keyword = title_keyword[:120]
-    title_value = f"Search: {title_keyword}"
-
-    publication_year_text = f"{year_range[0]}-{year_range[1]}"
-    type_text = ", ".join(work_types) if work_types else "Any"
-    language_text = language or "Any"
-    member_state_text = member_state or "All"
-    cet_now = datetime.now(ZoneInfo("Europe/Paris")).isoformat()
-
-    properties = {
-        "Name": {"title": [{"text": {"content": title_value}}]},
-        "Keyword": {"rich_text": [{"text": {"content": used_keyword_clean}}]},
-        "Publication year": {"rich_text": [{"text": {"content": publication_year_text}}]},
-        "Type": {"rich_text": [{"text": {"content": type_text}}]},
-        "Language": {"rich_text": [{"text": {"content": language_text}}]},
-        "UN member states": {"rich_text": [{"text": {"content": member_state_text}}]},
-        "Max Number": {"number": int(max_number)},
-        "Returned results": {"number": int(returned_results)},
-        "Datetime": {"date": {"start": cet_now}},
-    }
-
-    ok, detail = _create_notion_page(
-        token=token,
-        database_id=database_id,
-        properties=properties,
-    )
-    if not ok:
-        return False, f"Failed to write search log to Notion. Response detail: {detail}"
-
-    return True, "Search log saved to Notion."
-
-
 def render_feedback_page() -> None:
     st.divider()
     st.markdown("## Climate Literature Navigator")
@@ -508,7 +386,7 @@ def render_feedback_page() -> None:
         elif missing:
             st.error(f"Please complete the required fields: {', '.join(missing)}.")
         else:
-            ok, msg = _write_feedback_to_notion(
+            ok, msg = write_feedback_to_notion(
                 name=name.strip(),
                 chapter=chapter.strip(),
                 email=email.strip(),

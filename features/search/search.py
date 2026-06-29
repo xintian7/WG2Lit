@@ -1,13 +1,15 @@
 import json
 import re
-import time
 from typing import Any
 
 import pandas as pd
-import requests
 import streamlit as st
 
-from utils import OPENALEX_PAGE_SIZE, DISPLAY_CONTAINER_HEIGHT, MAX_WORK_TYPES
+from core.constants import OPENALEX_PAGE_SIZE, MAX_WORK_TYPES
+from services.openalex_client import (
+    extract_status_code,
+    fetch_results_with_count,
+)
 
 
 def get_work_topics(work: dict[str, Any]) -> str:
@@ -436,61 +438,6 @@ def perform_search(
             requested_n = max(int(num_results), 1)
             openalex_total = 0
 
-            def _request_openalex(params: dict[str, Any], *, timeout: int = 30) -> requests.Response:
-                """Send an OpenAlex request with retries for transient failures."""
-                max_attempts = 3
-                last_exc: Exception | None = None
-                for attempt in range(1, max_attempts + 1):
-                    try:
-                        response = requests.get(
-                            "https://api.openalex.org/works",
-                            params=params,
-                            timeout=timeout,
-                        )
-                        # Retry only on transient status codes.
-                        if response.status_code in (429, 500, 502, 503, 504):
-                            if attempt < max_attempts:
-                                time.sleep(0.6 * attempt)
-                                continue
-                        response.raise_for_status()
-                        return response
-                    except requests.RequestException as exc:
-                        last_exc = exc
-                        if attempt < max_attempts:
-                            time.sleep(0.6 * attempt)
-                            continue
-                        raise
-                if last_exc:
-                    raise last_exc
-                raise RuntimeError("OpenAlex request failed without exception detail.")
-
-            def _extract_status_code(exc: Exception) -> int | None:
-                """Extract HTTP status code from a requests exception when available."""
-                response = getattr(exc, "response", None)
-                if response is None:
-                    return None
-                status_code = getattr(response, "status_code", None)
-                return int(status_code) if isinstance(status_code, int) else None
-
-            def _fetch_paginated(params: dict[str, Any], limit: int) -> list[dict[str, Any]]:
-                """Fetch up to `limit` records across multiple OpenAlex pages."""
-                page_size = min(OPENALEX_PAGE_SIZE, 100)
-                page = 1
-                collected: list[dict[str, Any]] = []
-                while len(collected) < limit:
-                    response = _request_openalex(
-                        {**params, "per_page": page_size, "page": page},
-                        timeout=30,
-                    )
-                    batch = (response.json() or {}).get("results") or []
-                    if not batch:
-                        break
-                    collected.extend(batch)
-                    if len(batch) < page_size:
-                        break
-                    page += 1
-                return collected[:limit]
-
             # Map UI sort option to OpenAlex sort kwargs
             _sort_map = {
                 "Relevance": None,
@@ -509,44 +456,18 @@ def perform_search(
 
             query_params = _apply_sort(base_params)
 
-            def _fetch_results_with_count(params: dict[str, Any], limit: int) -> tuple[list[dict[str, Any]], int]:
-                total = 0
-                results_list = []
-                
-                # For semantic search: only make ONE request due to 1 req/sec rate limit
-                # Get results directly without a separate count request
-                if use_semantic_search:
-                    try:
-                        response = _request_openalex(
-                            {**params, "per_page": min(limit, 50)},  # Semantic search max is 50
-                            timeout=30,
-                        )
-                        data = response.json() or {}
-                        total = int(data.get("meta", {}).get("count") or 0)
-                        results_list = data.get("results") or []
-                    except Exception:
-                        total = 0
-                        results_list = []
-                else:
-                    # For regular search: make count request first, then results request
-                    try:
-                        count_response = _request_openalex(
-                            {**params, "per_page": 1},
-                            timeout=30,
-                        )
-                        total = int((count_response.json() or {}).get("meta", {}).get("count") or 0)
-                    except Exception:
-                        total = 0
-                    results_list = _fetch_paginated(params, limit)
-                
-                return results_list, total
-
             try:
-                all_results, openalex_total = _fetch_results_with_count(query_params, requested_n)
+                all_results, openalex_total = fetch_results_with_count(
+                    query_params,
+                    limit=requested_n,
+                    use_semantic_search=use_semantic_search,
+                    page_size=min(OPENALEX_PAGE_SIZE, 100),
+                    timeout=30,
+                )
             except Exception as exc:
                 had_connection_issue = True
                 connection_error_detail = str(exc)
-                connection_error_status = _extract_status_code(exc)
+                connection_error_status = extract_status_code(exc)
                 all_results = []
 
                 # Fallback: for plain multi-word queries, retry with quoted phrase.
@@ -576,13 +497,19 @@ def perform_search(
 
                     fallback_params = _apply_sort({"filter": ",".join(fallback_filter_parts)})
                     try:
-                        all_results, openalex_total = _fetch_results_with_count(fallback_params, requested_n)
+                        all_results, openalex_total = fetch_results_with_count(
+                            fallback_params,
+                            limit=requested_n,
+                            use_semantic_search=False,
+                            page_size=min(OPENALEX_PAGE_SIZE, 100),
+                            timeout=30,
+                        )
                         had_connection_issue = False
                         connection_error_detail = ""
                         connection_error_status = None
                     except Exception as fallback_exc:
                         connection_error_detail = str(fallback_exc)
-                        connection_error_status = _extract_status_code(fallback_exc)
+                        connection_error_status = extract_status_code(fallback_exc)
 
             # Deduplicate overall and trim to requested total
             seen = set()
