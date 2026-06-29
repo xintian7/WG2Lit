@@ -210,3 +210,4 @@ __marimo__/
 
 # Local guide docs
 docs/guides/**/*.md
+changelogs.md
