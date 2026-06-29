@@ -21,6 +21,20 @@ from core.constants import (
     UN_MEMBER_STATE_TO_COUNTRY_CODE,
 )
 from utils import record_identifier
+from pages import (
+    render_about_page,
+    render_disclaimer_page,
+    render_user_guide_page,
+    render_give_feedback_page,
+    render_other_apps_page,
+    render_todo_page,
+    render_settings_page,
+    render_literature_analysis_page,
+    render_literature_review_page,
+    render_literature_network_page,
+    render_literature_export_page,
+    render_literature_search_page,
+)
 
 
 load_dotenv()
@@ -403,7 +417,7 @@ def render_feedback_page() -> None:
 
 page_key = _get_query_param("page")
 if page_key == "feedback":
-    render_feedback_page()
+    render_give_feedback_page(write_feedback_to_notion, show_back_link=True)
     st.stop()
 
 # Render doc pages before the main UI.
@@ -564,675 +578,214 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-st.markdown("<h3 style='text-align:center'>Settings 🛠️</h3>", unsafe_allow_html=True)
 
-# OpenAlex API control below title
-label_col, input_col = st.columns([1, 4])
-with label_col:
-    st.markdown("**OpenAlex API**")
-with input_col:
-    openalex_api = st.text_input(
-        "",
-        value="",
-        placeholder="Placeholder for a future version (currently not required for version 0.5)",
-        label_visibility="collapsed",
-        key="openalex_api_input",
-    )
+st.markdown(
+    """
+<style>
+section[data-testid="stSidebar"] div[data-baseweb="radio"] > div:first-child,
+section[data-testid="stSidebar"] div[role="radiogroup"] label > div:first-child,
+section[data-testid="stSidebar"] div[role="radiogroup"] label [aria-checked] {
+    display: none !important;
+}
 
-# # OpenAI API control below OpenAlex API
-# label_col, input_col = st.columns([1, 4])
-# with label_col:
-#     st.markdown("**OpenAI API**")
-# with input_col:
-#     openai_api = st.text_input(
-#         "",
-#         value="",
-#         placeholder="Enter OpenAI API key",
-#         label_visibility="collapsed",
-#         key="openai_api_input",
-#     )
+section[data-testid="stSidebar"] div[role="radiogroup"] label {
+    padding: 3px 8px !important;
+    border-radius: 6px !important;
+    margin-bottom: 1px !important;
+    min-height: 0 !important;
+    line-height: 1.15 !important;
+    transition: background-color 0.15s ease;
+}
 
-# Sidebar
+section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {
+    background-color: rgba(0, 169, 207, 0.28) !important;
+    border: 1px solid rgba(0, 169, 207, 0.65) !important;
+}
+
+section[data-testid="stSidebar"] div[role="radiogroup"] label:hover {
+    background-color: rgba(0, 169, 207, 0.16);
+}
+
+section[data-testid="stSidebar"] hr {
+    margin: 0.45rem 0 !important;
+}
+</style>
+""",
+unsafe_allow_html=True,
+)
+
+if "sidebar_info_section" not in st.session_state:
+    st.session_state["sidebar_info_section"] = "about"
+if "sidebar_main_section" not in st.session_state:
+    st.session_state["sidebar_main_section"] = None
+if "active_panel" not in st.session_state:
+    st.session_state["active_panel"] = "info:about"
+
+tab_key = _get_query_param("tab")
+last_processed_tab_key = st.session_state.get("last_processed_tab_key")
+if tab_key and tab_key != last_processed_tab_key:
+    normalized_tab_key = tab_key.strip().lower().replace("_", "-")
+    info_tab_map = {
+        "about": "about",
+        "disclaimer": "disclaimer",
+        "user-guide": "user guide",
+        "give-feedback": "give feedback",
+        "other-apps": "other apps",
+        "to-do": "to do",
+    }
+    main_tab_map = {
+        "settings": "settings",
+        "litereature-search": "litereature search",
+        "literature-analysis": "literature analysis",
+        "literature-review": "literature review",
+        "literature-network": "literature network",
+        "literature-export": "literature export",
+    }
+
+    info_tab = info_tab_map.get(normalized_tab_key)
+    main_tab = main_tab_map.get(normalized_tab_key)
+
+    if info_tab:
+        st.session_state["sidebar_info_section"] = info_tab
+        st.session_state["sidebar_main_section"] = None
+        st.session_state["active_panel"] = f"info:{info_tab}"
+        st.session_state["last_processed_tab_key"] = tab_key
+    elif main_tab:
+        st.session_state["sidebar_info_section"] = None
+        st.session_state["sidebar_main_section"] = main_tab
+        st.session_state["active_panel"] = f"main:{main_tab}"
+        st.session_state["last_processed_tab_key"] = tab_key
+
+requested_info_tab = st.session_state.pop("requested_info_tab", None)
+if requested_info_tab in {"about", "disclaimer", "user guide", "give feedback", "other apps", "to do"}:
+    st.session_state["sidebar_info_section"] = requested_info_tab
+    st.session_state["sidebar_main_section"] = None
+    st.session_state["active_panel"] = f"info:{requested_info_tab}"
+
+
+def _on_info_section_change() -> None:
+    selected_info = st.session_state.get("sidebar_info_section")
+    st.session_state["sidebar_main_section"] = None
+    if selected_info:
+        st.session_state["active_panel"] = f"info:{selected_info}"
+
+
+def _on_main_section_change() -> None:
+    selected_main = st.session_state.get("sidebar_main_section")
+    if selected_main:
+        st.session_state["sidebar_info_section"] = None
+        st.session_state["active_panel"] = f"main:{selected_main}"
 
 
 with st.sidebar:
-    st.header("About")
     st.markdown(
-        "<span style='color: #00a9cf; font-weight: bold;'>Climate Literature Navigator</span> (ver 0.2) "
-        "is a web app developed by the <a href='https://www.ipcc.ch/working-group/wg2/'>IPCC WGII</a> TSU to help IPCC authors find climate-related literature from <a href='https://openalex.org'>OpenAlex</a>'s database. "
-        "Please contact tsu@ipccwg2.org if you have any questions or suggestions.",
-        unsafe_allow_html=True
+        "<span style='color: #00a9cf; font-weight: bold;'>Climate Literature Navigator (ver 0.2)</span>",
+        unsafe_allow_html=True,
     )
-    # Sidebar keeps About and Disclaimer only; search controls moved to main page
+    st.markdown("Read information")
 
-    st.sidebar.markdown("### Disclaimer")
-    st.sidebar.markdown(
-        "Please carefully review the [Terms of Use](?doc=terms) and [Privacy Policy](?doc=privacy) before using this app. "
-        "By using the app, you agree to the terms outlined in these documents."
-    )
-
-    st.sidebar.markdown(
-        "<p>Please also note that the information provided by "
-        "<span style='color: #00a9cf; font-weight: bold;'>Climate Literature Navigator</span> "
-        " is fully sourced from <a href='https://openalex.org'>OpenAlex</a>. "
-        "While we strive to ensure accuracy, we cannot guarantee the completeness or reliability of the data. "
-        "Users should verify the information independently before making decisions based on it.</p>",
-        unsafe_allow_html=True
-    )
-
-    st.sidebar.markdown("### User Guide")
-    st.sidebar.markdown(
-        "Please carefully read the [User Guide](https://xintian.notion.site/Climate-Literature-Navigator-User-guide-35a34913e84c805299cffccb92293cba)."
-    )
-
-    st.sidebar.markdown("### Give feedback")
-    st.sidebar.markdown(
-        "Please share your questions or suggestions using the "
-        "[feedback form](?page=feedback)."
-    )
-
-    st.sidebar.markdown("### Other WGII TSU Apps")
-    st.sidebar.markdown(
-        "[WGII LLM App](https://wg2llm.streamlit.app/)"
-    )
-
-    st.sidebar.markdown("### To-do")
-    st.sidebar.checkbox("General maintenance after LAM2 (v0.1b)", value=True, key="todo_auth_gs")
-    st.sidebar.checkbox("Zotero integration (v0.2)", value=True, key="todo_zotero")
-    st.sidebar.checkbox("Add multi-page tabs (v0.2)", value=False, key="todo_multi_page")
-    st.sidebar.checkbox("Add more databases, e.g. Scopus, Overton, CORE, ReliefWeb (v0.3)", value=False, key="todo_search_sources")
-    st.sidebar.checkbox("Add cloud-based features (v0.4)", value=False, key="todo_cloud")
-    st.sidebar.checkbox("Performance improvements for larger result sets (v0.4)", value=False, key="todo_performance")
-    st.sidebar.checkbox("General maintenance (v0.4)", value=False, key="todo_maintenance")
-    st.sidebar.checkbox("User accounts and saved searches (v0.5)", value=False, key="todo_accounts")
-    st.sidebar.checkbox("Add Load CSV functionality (v0.5)", value=False, key="todo_load_csv")
-    st.sidebar.checkbox("Add semantic analysis (v0.6)", value=False, key="todo_analysis")
-    st.sidebar.checkbox("Add knowledge graphs (v0.7)", value=False, key="todo_knowledge_graph")
-    st.sidebar.checkbox("UI enhancements (v0.8)", value=False, key="todo_ui_enhancements")
-
-    # logo_path = Path(__file__).parent / "assets" / "ipcc.png"
-    # if logo_path.exists():
-    #     st.sidebar.image(str(logo_path), width=200)
-    # else:
-    #     st.sidebar.caption("IPCC logo not found at assets/ipcc.png")
-
-# Main search section (centered title and controls in one row)
-st.divider()
-st.markdown("<h3 style='text-align:center'>Literature searching 🔎</h3>", unsafe_allow_html=True)
-
-# Keyword: label+help line, then control line
-label_col, help_col = st.columns([1, 4])
-with label_col:
-    st.markdown("**Keyword**")
-with help_col:
-    st.caption(
-        "Use Boolean operators to combine terms:  \n"
-        "**AND**: requires all terms,  \n"
-        "**OR**: allows either term,  \n"
-        "**Parentheses**: group logic,  \n"
-        "**Double quotes**: exact phrases,  \n"
-        "**Notes**: Other operators are not supported at this moment. Please submit feedback using the feedback form if you need additional operators.  \n"
-        "**Example**: \"climate change\" AND (water OR \"land use\") AND Bahamas.  \n"
-        "**Reference**: [OpenAlex searching guide](https://developers.openalex.org/guides/searching)"
-    )
-kw_col1, kw_col2 = st.columns([1, 4])
-with kw_col1:
-    st.write("")
-with kw_col2:
-    keyword = st.text_input("", value="climate change", label_visibility="collapsed", key="kw")
-    use_semantic_search = st.checkbox(
-        "Semantic search",
-        value=False,
-        key="semantic_search",
-        help="If checked, use semantic search (broader, AI-powered matching). If unchecked, use regular Boolean search (more precise, keyword-based). Note: Semantic search does not support country/institution filters. Reference: https://developers.openalex.org/guides/semantic-search",
-    )
-
-# Publication year: label+help line, then slider line
-label_col, help_col = st.columns([1, 4])
-with label_col:
-    st.markdown("**Publication year**")
-with help_col:
-    st.caption("Select a start and end year for the publication date range.")
-yr_col1, yr_col2 = st.columns([1, 4])
-with yr_col1:
-    st.write("")
-with yr_col2:
-    year_range = st.slider("", 1900, 2027, (2000, 2025), label_visibility="collapsed", key="yr")
-
-# Type: label+help line, then multiselect line
-label_col, help_col = st.columns([1, 4])
-with label_col:
-    st.markdown("**Type**")
-with help_col:
-    st.caption(
-        f"Due to processing time, you can select up to {MAX_WORK_TYPES} categories at one time. "
-        "It will be improved in a future version to allow more categories."
-    )
-type_col1, type_col2 = st.columns([1, 4])
-with type_col1:
-    st.write("")
-with type_col2:
-    work_types = st.multiselect(
-        "",
-        options=[
-            "article",
-            "book",
-            "book-chapter",
-            "dataset",
-            "dissertation",
-            "editorial",
-            "erratum",
-            "letter",
-            "libguides",
-            "other",
-            "paratext",
-            "peer-review",
-            "preprint",
-            "reference-entry",
-            "report",
-            "retraction",
-            "review",
-            "standard",
-            "supplementary-materials",
-        ],
-        default=["report"],
-        label_visibility="collapsed",
-        key="wt",
-    )
-    if work_types and len(work_types) > MAX_WORK_TYPES:
-        st.warning(f"You selected more than {MAX_WORK_TYPES} types — only the first {MAX_WORK_TYPES} will be used.")
-        work_types = work_types[:MAX_WORK_TYPES]
-
-# Language: label+help line, then control line
-label_col, help_col = st.columns([1, 4])
-with label_col:
-    st.markdown("**Language**")
-with help_col:
-    st.caption("Filter results by language. Default is English. When selecting other languages, the keywords can be in the selected language or in English, which will give different results. We are working on a future version to allow more flexible combinations of languages and keywords.")
-lang_col1, lang_col2 = st.columns([1, 4])
-with lang_col1:
-    st.write("")
-with lang_col2:
-    language_option = st.selectbox(
-        "",
-        options=[
-            "Any",
-            "English",
-            "Arabic",
-            "Chinese",
-            "French",
-            "Russian",
-            "Spanish",
-            # "Dutch",
-            # "German",
-            # "Hindi",
-            # "Indonesian",
-            # "Italian",
-            # "Japanese",
-            # "Korean",
-            # "Persian",
-            # "Polish",
-            # "Portuguese",
-            # "Turkish",
-            # "Ukrainian",
-            # "Vietnamese",
-        ],
-        index=1,
-        label_visibility="collapsed",
-        key="lang",
-    )
-    language_code_map = {
-        "Any": None,
-        "English": "en",
-        "Arabic": "ar",
-        "Chinese": "zh",
-        "French": "fr",
-        "Russian": "ru",
-        "Spanish": "es",
-        # "Dutch": "nl",
-        # "German": "de",
-        # "Hindi": "hi",
-        # "Indonesian": "id",
-        # "Italian": "it",
-        # "Japanese": "ja",
-        # "Korean": "ko",
-        # "Persian": "fa",
-        # "Polish": "pl",
-        # "Portuguese": "pt",
-        # "Turkish": "tr",
-        # "Ukrainian": "uk",
-        # "Vietnamese": "vi",
+    info_icon_map = {
+        "about": "ℹ️ About",
+        "disclaimer": "⚠️ Disclaimer",
+        "user guide": "📘 User Guide",
+        "give feedback": "💬 Give Feedback",
+        "other apps": "🧩 Other Apps",
+        "to do": "✅ To Do",
     }
-    selected_language = language_code_map.get(language_option)
 
-# Global South filter is not used for now.
-# label_col, help_col = st.columns([1, 4])
-# with label_col:
-#     st.markdown("**Global South**")
-# with help_col:
-#     st.caption("If checked, only works with institutions from the Global South are included.")
-# gs_col1, gs_col2 = st.columns([1, 4])
-# with gs_col1:
-#     st.write("")
-# with gs_col2:
-#     filter_global_south = st.checkbox(
-#         "Global South",
-#         value=False,
-#         key="global_south_filter",
-#     )
-filter_global_south = False
+    main_icon_map = {
+        "settings": "⚙️ Settings",
+        "litereature search": "🔎 Litereature Search",
+        "literature analysis": "📊 Literature Analysis",
+        "literature review": "📑 Literature Review",
+        "literature network": "🔗 Literature Network",
+        "literature export": "📤 Literature Export",
+    }
 
-# UN member states: label+help line, then control line
-label_col, help_col = st.columns([1, 4])
-with label_col:
-    st.markdown("**UN member states**")
-with help_col:
-    st.caption(
-        "Filter results to works where **at least one institution/affiliation of this publication is from the selected UN member state** "
-        "([UN member states](https://www.un.org/en/about-us/member-states)). "
-        "When this filter is not applied, results will include works from any state worldwide."
-    )
-state_col1, state_col2 = st.columns([1, 4])
-with state_col1:
-    st.write("")
-with state_col2:
-    selected_member_state = st.selectbox(
+    st.radio(
         "",
-        options=UN_MEMBER_STATES,
+        options=["about", "disclaimer", "user guide", "give feedback", "other apps", "to do"],
         index=None,
-        placeholder="You can leave this field empty to include works from all states.",
+        key="sidebar_info_section",
         label_visibility="collapsed",
-        key="un_member_state",
+        on_change=_on_info_section_change,
+        format_func=lambda label: info_icon_map.get(label, label.title()),
     )
-    selected_member_state_code = UN_MEMBER_STATE_TO_COUNTRY_CODE.get(selected_member_state or "")
 
-# Number of results: label line then control line
-label_col, help_col = st.columns([1, 4])
-with label_col:
-    st.markdown("**Max Number**")
-with help_col:
-    st.caption("Select the maximum number of results to return (max 5000 for the time being). More results take longer to load.")
-nr_col1, nr_col2 = st.columns([1, 4])
-with nr_col1:
-    st.write("")
-with nr_col2:
-    num_results = st.slider("", 1, 5000, 500, label_visibility="collapsed", key="nr")
+    st.divider()
 
-sort_by = st.session_state.get("sb", "Relevance")
+    st.markdown("Find Literature")
 
-# Container for results (keeps results snug under the search area)
-results_container = st.container()
-# Container for analysis output (heatmap etc.)
-analyze_container = st.container()
-
-# Button grid (4 columns per row)
-with st.container():
-    did_search = False
-    did_analyze = False
-
-    # Row 1: Search (1-1), Analyze (1-2), Clear (1-3), empty (1-4)
-    r1c1, r1c2, r1c3, r1c4 = st.columns(4)
-    with r1c1:
-        if st.button(
-            "Search OpenAlex",
-            key="main_search_button",
-            type="primary",
-            use_container_width=True,
-        ):
-            normalized_keyword, needs_review, explanation = normalize_keyword_query(keyword)
-            if needs_review and not use_semantic_search:
-                st.session_state["keyword_search_request"] = {
-                    "keyword": keyword,
-                    "year_range": year_range,
-                    "num_results": num_results,
-                    "work_types": work_types,
-                    "language": selected_language,
-                    "language_label": language_option,
-                    "is_global_south": filter_global_south,
-                    "institution_country_code": selected_member_state_code,
-                    "member_state": selected_member_state,
-                    "display_limit": 5,
-                    "sort_by": sort_by,
-                    "use_semantic_search": use_semantic_search,
-                }
-                st.session_state["keyword_search_review"] = {
-                    "original": keyword,
-                    "corrected": normalized_keyword,
-                    "explanation": explanation,
-                }
-                st.session_state.pop("keyword_search_decision", None)
-            else:
-                did_search = True
-                st.session_state.pop("keyword_search_request", None)
-                st.session_state.pop("keyword_search_review", None)
-                st.session_state.pop("keyword_search_decision", None)
-                _run_keyword_search(
-                    normalized_keyword,
-                    keyword,
-                    year_range,
-                    num_results,
-                    work_types,
-                    selected_language,
-                    language_option,
-                    filter_global_south,
-                    selected_member_state_code,
-                    selected_member_state,
-                    results_container,
-                    5,
-                    sort_by,
-                    use_semantic_search,
-                )
-    with r1c2:
-        if st.button(
-            "Analyze Results",
-            key="analyze_results_button",
-            type="primary",
-            use_container_width=True,
-        ):
-            payload = st.session_state.get("last_payload")
-            if not payload:
-                st.warning("Run a search first to analyze results.")
-            else:
-                did_analyze = True
-                st.session_state["last_analyze_triggered"] = True
-                perform_analyze(payload, year_range, container=analyze_container)
-    with r1c3:
-        if st.button(
-            "Clear Results",
-            key="clear_results_button",
-            type="primary",
-            use_container_width=True,
-        ):
-            st.session_state.pop("last_analyze_triggered", None)
-            analyze_container.empty()
-            st.rerun()
-    with r1c4:
-        st.write("")
-
-    pending_review = st.session_state.get("keyword_search_review")
-    pending_request = st.session_state.get("keyword_search_request")
-    pending_decision = st.session_state.get("keyword_search_decision")
-
-    if pending_review and not pending_decision:
-        _keyword_correction_dialog(pending_review)
-
-    if pending_request and pending_decision:
-        request_keyword = pending_request.get("keyword", "")
-        if pending_decision == "apply":
-            # Use the same value shown in the keyword textbox after approval.
-            request_keyword = st.session_state.get("kw", request_keyword)
-
-        did_search = True
-        _run_keyword_search(
-            request_keyword,
-            pending_request.get("keyword", request_keyword),
-            pending_request.get("year_range", year_range),
-            pending_request.get("num_results", num_results),
-            pending_request.get("work_types", work_types),
-            pending_request.get("language", selected_language),
-            pending_request.get("language_label", language_option),
-            pending_request.get("is_global_south", filter_global_south),
-            pending_request.get("institution_country_code", selected_member_state_code),
-            pending_request.get("member_state", selected_member_state),
-            results_container,
-            pending_request.get("display_limit", 5),
-            pending_request.get("sort_by", sort_by),
-            pending_request.get("use_semantic_search", use_semantic_search),
-        )
-        st.session_state.pop("keyword_search_request", None)
-        st.session_state.pop("keyword_search_review", None)
-        st.session_state.pop("keyword_search_decision", None)
-
-    payload = st.session_state.get("last_payload")
-    payload_for_download = _payload_after_skips(payload)
-    bibtex_payload = _payload_to_bibtex(payload_for_download)
-
-    # Row 2: CSV (2-1), JSON (2-2), BibTeX (2-3), Neo4j (2-4)
-    r2c1, r2c2, r2c3, r2c4 = st.columns(4)
-    with r2c1:
-        if payload_for_download:
-            st.download_button(
-                "Download CSV",
-                payload_for_download["csv"],
-                "openalex_results.csv",
-                "text/csv",
-                key="download_csv_button",
-                use_container_width=True,
-            )
-        else:
-            st.download_button(
-                "Download CSV",
-                data=b"",
-                file_name="openalex_results.csv",
-                mime="text/csv",
-                key="download_csv_button_disabled",
-                disabled=True,
-                use_container_width=True,
-            )
-    with r2c2:
-        if payload_for_download:
-            st.download_button(
-                "Download JSON",
-                payload_for_download["json"],
-                "openalex_results.json",
-                "application/json",
-                key="download_json_button",
-                use_container_width=True,
-            )
-        else:
-            st.download_button(
-                "Download JSON",
-                data=b"",
-                file_name="openalex_results.json",
-                mime="application/json",
-                key="download_json_button_disabled",
-                disabled=True,
-                use_container_width=True,
-            )
-    with r2c3:
-        if bibtex_payload:
-            st.download_button(
-                "Download BibTex (for Zotero)",
-                data=bibtex_payload,
-                file_name="openalex_results.bib",
-                mime="application/x-bibtex",
-                key="download_bibtex_button",
-                use_container_width=True,
-            )
-        else:
-            st.download_button(
-                "Download BibTex (for Zotero)",
-                data=b"",
-                file_name="openalex_results.bib",
-                mime="application/x-bibtex",
-                key="download_bibtex_button_disabled",
-                disabled=True,
-                use_container_width=True,
-            )
-    with r2c4:
-        if payload_for_download:
-            neo4j_cypher = build_neo4j_cypher(payload_for_download)
-            st.download_button(
-                "Download Neo4j",
-                data=neo4j_cypher,
-                file_name="openalex_results.cypher",
-                mime="text/plain",
-                key="download_neo4j_button",
-                use_container_width=True,
-            )
-        else:
-            st.download_button(
-                "Download Neo4j",
-                data=b"",
-                file_name="openalex_results.cypher",
-                mime="text/plain",
-                key="download_neo4j_button_disabled",
-                disabled=True,
-                use_container_width=True,
-            )
-
-st.divider()
-st.markdown("<h3 style='text-align:center'>Literature Review & Export 📑</h3>", unsafe_allow_html=True)
-
-label_col, help_col = st.columns([1, 4])
-with label_col:
-    st.markdown("**Filter Topic**")
-with help_col:
-    st.caption("Select one or more topics to display relevant publications.")
-
-cached_payload = st.session_state.get("last_payload")
-NO_GENERATED_TOPICS_LABEL = "No Generated Topics"
-
-# Topic filter control for HTML preview
-html_records_all = []
-html_topic_options = []
-if cached_payload:
-    try:
-        html_records_all = json.loads(cached_payload.get("json") or "[]")
-    except Exception:
-        html_records_all = []
-
-if isinstance(html_records_all, list) and html_records_all:
-    skipped_ids = set(st.session_state.get("html_skipped_publications", []))
-
-    if skipped_ids:
-        html_records_all = [
-            rec for rec in html_records_all
-            if record_identifier(rec) not in skipped_ids
-        ]
-
-if isinstance(html_records_all, list) and html_records_all:
-    topic_set = set()
-    has_no_generated_topics = False
-    for rec in html_records_all:
-        if not isinstance(rec, dict):
-            continue
-        topics_str = (rec.get("Topics") or "").strip()
-        if not topics_str:
-            has_no_generated_topics = True
-            continue
-        for t in [x.strip() for x in topics_str.split(";") if x.strip()]:
-            topic_set.add(t)
-    html_topic_options = sorted(topic_set, key=str.lower)
-    if has_no_generated_topics:
-        html_topic_options.append(NO_GENERATED_TOPICS_LABEL)
-
-flt_col1, flt_col2 = st.columns([1, 4])
-with flt_col1:
-    st.write("")
-with flt_col2:
-    def _on_select_all_topics_change():
-        if st.session_state.get("html_topic_select_all"):
-            st.session_state["html_topic_filter"] = html_topic_options.copy()
-            st.session_state["html_topic_deselect_all"] = False
-
-    def _on_deselect_all_topics_change():
-        if st.session_state.get("html_topic_deselect_all"):
-            st.session_state["html_topic_filter"] = []
-            st.session_state["html_topic_select_all"] = False
-            # Use as an action-like control; reset after applying
-            st.session_state["html_topic_deselect_all"] = False
-
-    def _on_topic_filter_change():
-        selected_now = st.session_state.get("html_topic_filter", [])
-        if st.session_state.get("html_topic_select_all") and len(selected_now) < len(html_topic_options):
-            st.session_state["html_topic_select_all"] = False
-        if selected_now:
-            st.session_state["html_topic_deselect_all"] = False
-
-    toggle_col1, toggle_col2 = st.columns(2)
-    with toggle_col1:
-        select_all_topics = st.checkbox(
-            "Select all topics",
-            value=False,
-            key="html_topic_select_all",
-            on_change=_on_select_all_topics_change,
-        )
-    with toggle_col2:
-        st.checkbox(
-            "Deselect all topics",
-            value=False,
-            key="html_topic_deselect_all",
-            on_change=_on_deselect_all_topics_change,
-        )
-
-    selected_html_topics = st.multiselect(
+    st.radio(
         "",
-        options=html_topic_options,
-        key="html_topic_filter",
+        options=["litereature search", "literature analysis", "literature review", "literature network", "literature export", "settings"],
+        index=None,
+        key="sidebar_main_section",
         label_visibility="collapsed",
-        on_change=_on_topic_filter_change,
+        on_change=_on_main_section_change,
+        format_func=lambda label: main_icon_map.get(label, label.title()),
     )
 
-label_col, help_col = st.columns([1, 4])
-with label_col:
-    st.markdown("**Sort by**")
-with help_col:
-    st.caption("Choose how to order the results: by relevance score, citation count, or publication date.")
-sort_col1, sort_col2 = st.columns([1, 4])
-with sort_col1:
-    st.write("")
-with sort_col2:
-    current_sort = st.session_state.get("sb", "Relevance")
-    sort_options = ["Relevance", "Citation count", "Date"]
-    sort_index = sort_options.index(current_sort) if current_sort in sort_options else 0
-    st.selectbox(
-        "",
-        options=sort_options,
-        index=sort_index,
-        label_visibility="collapsed",
-        key="sb",
+active_panel = st.session_state.get("active_panel", "info:about")
+
+if active_panel == "info:about":
+    render_about_page()
+    st.stop()
+
+if active_panel == "info:disclaimer":
+    render_disclaimer_page(Path(__file__).parent)
+    st.stop()
+
+if active_panel == "info:user guide":
+    render_user_guide_page()
+    st.stop()
+
+if active_panel == "info:give feedback":
+    render_give_feedback_page(write_feedback_to_notion, show_back_link=False)
+    st.stop()
+
+if active_panel == "info:other apps":
+    render_other_apps_page()
+    st.stop()
+
+if active_panel == "info:to do":
+    render_todo_page()
+    st.stop()
+
+active_main_section = st.session_state.get("sidebar_main_section")
+
+if active_main_section == "literature analysis":
+    render_literature_analysis_page(perform_analyze)
+    st.stop()
+
+if active_main_section == "literature review":
+    render_literature_review_page(render_html_preview)
+    st.stop()
+
+if active_main_section == "literature network":
+    render_literature_network_page()
+    st.stop()
+
+if active_main_section == "literature export":
+    render_literature_export_page(
+        _payload_after_skips,
+        _payload_to_bibtex,
+        build_neo4j_cypher,
     )
+    st.stop()
 
-_, html_btn_wrap, _ = st.columns([1, 4, 1])
-with html_btn_wrap:
-    html_btn_col1, html_btn_col2, html_btn_col3 = st.columns([2, 2, 2])
-    with html_btn_col1:
-        if st.button("Read Publications", key="view_html_button", type="primary", use_container_width=True):
-            if cached_payload:
-                st.session_state["show_html_preview"] = True
-            else:
-                st.warning("Run a search first to view HTML results.")
-    with html_btn_col2:
-        if st.button("Load CSV", key="load_csv_button", type="secondary", use_container_width=True):
-            st.warning("Load CSV is still under construction.")
-    with html_btn_col3:
-        st.write("")
+if active_main_section == "settings":
+    render_settings_page()
+    st.stop()
 
-html_container = st.container()
-if st.session_state.get("show_html_preview") and cached_payload:
-    payload_for_html = cached_payload
-    if isinstance(html_records_all, list):
-        if not selected_html_topics:
-            payload_for_html = dict(cached_payload)
-            payload_for_html["json"] = json.dumps([], ensure_ascii=False)
-            html_container.caption("Filtered results: 0")
-        else:
-            include_no_generated_topics = NO_GENERATED_TOPICS_LABEL in selected_html_topics
-            selected_lc = {
-                t.lower() for t in selected_html_topics
-                if t != NO_GENERATED_TOPICS_LABEL
-            }
-            filtered_records = []
-            for rec in html_records_all:
-                if not isinstance(rec, dict):
-                    continue
-                topics_str = (rec.get("Topics") or "").strip()
-                rec_topics = {x.strip().lower() for x in topics_str.split(";") if x.strip()}
-                if rec_topics.intersection(selected_lc) or (include_no_generated_topics and not rec_topics):
-                    filtered_records.append(rec)
+if active_main_section != "litereature search":
+    st.stop()
 
-            payload_for_html = dict(cached_payload)
-            payload_for_html["json"] = json.dumps(filtered_records, ensure_ascii=False)
-            html_container.caption(f"Filtered results: {len(filtered_records)}")
-
-    render_html_preview(payload_for_html, container=html_container, top_n=None)
-
-# Re-render cached results on rerun (e.g., download click)
-if cached_payload and not did_search:
-    results_container.success(cached_payload.get("summary", "Results"))
-    # No caption or JSON preview for results.
-
-# Re-render cached analysis on rerun (e.g., download click)
-if st.session_state.get("last_analyze_triggered") and cached_payload and not did_analyze:
-    perform_analyze(cached_payload, year_range, container=analyze_container)
+render_literature_search_page(
+    normalize_keyword_query=normalize_keyword_query,
+    run_keyword_search=_run_keyword_search,
+    keyword_correction_dialog=_keyword_correction_dialog,
+    max_work_types=MAX_WORK_TYPES,
+    un_member_states=UN_MEMBER_STATES,
+    un_member_state_to_country_code=UN_MEMBER_STATE_TO_COUNTRY_CODE,
+)

@@ -25,7 +25,12 @@ def _add_skipped_publication(rec_id: str) -> None:
         st.session_state["html_skipped_publications"] = skipped + [rec_id]
 
 
-def render_html_preview(payload: dict | None, container: Any = None, top_n: int | None = None) -> None:
+def render_html_preview(
+    payload: dict | None,
+    container: Any = None,
+    top_n: int | None = None,
+    hide_abstracts: bool = False,
+) -> None:
     """Render top-N records as a compact HTML-style preview.
 
     Per record layout (6/7 rows):
@@ -35,7 +40,7 @@ def render_html_preview(payload: dict | None, container: Any = None, top_n: int 
     4) Authors
     5) Topic
     6) Keywords
-    7) Abstract
+    7) Abstract (optional)
     """
     display = container if container is not None else None
     if display is None:
@@ -136,6 +141,12 @@ def render_html_preview(payload: dict | None, container: Any = None, top_n: int 
                 f'<div class="html-preview-row"><span class="html-preview-label">Relevance Score</span>: {relevance}{url_part}{view_btn}</div>'
             )
 
+        abstract_row = ""
+        if not hide_abstracts:
+            abstract_row = (
+                f'<div class="html-preview-row"><span class="html-preview-label">Abstract</span>: {abstract}</div>'
+            )
+
         card_html = f"""
         <div class="html-preview-card">
             <div class="html-preview-row"><span class="html-preview-label">Title</span>: {title}, <span class="html-preview-label">Type</span>: {work_type}</div>
@@ -144,7 +155,7 @@ def render_html_preview(payload: dict | None, container: Any = None, top_n: int 
             <div class="html-preview-row"><span class="html-preview-label">Authors</span>: {authors}</div>
             <div class="html-preview-row"><span class="html-preview-label">Topic</span>: {topics}</div>
             <div class="html-preview-row"><span class="html-preview-label">Keywords</span>: {keywords}</div>
-            <div class="html-preview-row"><span class="html-preview-label">Abstract</span>: {abstract}</div>
+            {abstract_row}
         </div>
         """
 
