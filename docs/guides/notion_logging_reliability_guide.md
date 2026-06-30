@@ -7,6 +7,10 @@ This project writes two kinds of records to Notion:
 
 These writes can fail due to external network conditions even when credentials are valid.
 
+Status note (2026-06-30):
+- The Notion reliability approach remains active and unchanged.
+- Service modularization remains the preferred pattern for all external integrations.
+
 ## What Made It Work
 The Notion integration became reliable after combining architecture refactor + resilience strategies:
 
@@ -92,6 +96,15 @@ Handling:
    - queue write behavior
    - success/failure message contracts
 
+## Alignment With Current Service Standards
+
+To stay consistent with current `services/` conventions:
+
+1. Keep retry/fallback behavior explicit and centralized.
+2. Keep UI handlers free of direct external API request code.
+3. Keep warning-level logs for graceful fallback paths.
+4. Prefer narrow exception handling where practical.
+
 ## Quick Troubleshooting Steps
 
 1. Confirm env vars are present.
@@ -107,3 +120,5 @@ Handling:
 - `services/notion_client.py`
 - `services/notion_logging_service.py`
 - `.notion_search_log_queue.jsonl`
+
+Last reviewed: 2026-06-30

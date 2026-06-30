@@ -210,4 +210,7 @@ __marimo__/
 
 # Local guide docs
 docs/guides/**/*.md
+docs/**/*.md
 changelogs.md
+docs/student_intern_2026.md
+docs/guides/notion_logging_reliability_guide.md

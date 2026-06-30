@@ -690,7 +690,7 @@ with st.sidebar:
         "user guide": "📘 User Guide",
         "give feedback": "💬 Give Feedback",
         "other apps": "🧩 Other Apps",
-        "to do": "✅ To Do",
+        "to do": "✅ Development Plan",
     }
 
     main_icon_map = {
