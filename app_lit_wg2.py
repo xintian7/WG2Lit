@@ -2,11 +2,42 @@ import streamlit as st
 from pathlib import Path
 import json
 import os
+import sys
 import pandas as pd
 from dotenv import load_dotenv
 from typing import Any
 
-from features.search.search import normalize_keyword_query, perform_search
+
+def _clear_local_module_cache() -> None:
+    """Force app modules to be re-imported on Streamlit reruns during development."""
+    app_root = Path(__file__).resolve().parent
+    local_roots = {"core", "features", "pages", "services", "utils"}
+
+    for module_name, module in list(sys.modules.items()):
+        root_name = module_name.split(".", 1)[0]
+        if root_name not in local_roots:
+            continue
+
+        module_file = getattr(module, "__file__", None)
+        if not module_file:
+            continue
+
+        try:
+            module_path = Path(module_file).resolve()
+        except OSError:
+            continue
+
+        if module_path.is_relative_to(app_root):
+            sys.modules.pop(module_name, None)
+
+
+_clear_local_module_cache()
+
+from features.search.search import (
+    normalize_keyword_query,
+    perform_non_openalex_search,
+    perform_search,
+)
 from features.analyze.analyze import perform_analyze
 from features.graph.neo4j_export import build_neo4j_cypher
 from features.preview.html_preview import render_html_preview
@@ -53,6 +84,11 @@ footer {
 [data-testid="stDecoration"] {
     display: none;
 }
+
+/* Hide Streamlit's auto-generated multipage sidebar navigation */
+[data-testid="stSidebarNav"] {
+    display: none;
+}
             
 </style>
 """, unsafe_allow_html=True)
@@ -63,10 +99,6 @@ def _payload_after_skips(payload: dict | None) -> dict | None:
     if not payload:
         return payload
 
-    skipped_ids = set(st.session_state.get("html_skipped_publications", []))
-    if not skipped_ids:
-        return payload
-
     try:
         records = json.loads(payload.get("json") or "[]")
     except Exception:
@@ -75,20 +107,96 @@ def _payload_after_skips(payload: dict | None) -> dict | None:
     if not isinstance(records, list):
         return payload
 
+    skipped_ids = set(st.session_state.get("html_skipped_publications", []))
+
     filtered_records = [
         rec for rec in records
         if record_identifier(rec) not in skipped_ids
     ]
 
+    export_header_map = {
+        "OpenAlex": "OpenAlex/ReliefWeb/UN_DL",
+        "OpenAlex URL": "OpenAlex/ReliefWeb/UN_DL URL",
+        "Journal": "Journal/Source",
+        "Publication Date": "Publication Date/Datetime",
+    }
+
+    export_records = []
+    for rec in filtered_records:
+        if not isinstance(rec, dict):
+            continue
+        export_records.append({
+            export_header_map.get(key, key): value
+            for key, value in rec.items()
+        })
+
+    if not export_records and filtered_records:
+        return payload
+
     filtered_payload = dict(payload)
     filtered_payload["json"] = json.dumps(
-        filtered_records,
+        export_records,
         indent=2,
         ensure_ascii=False,
     ).encode("utf-8")
-    filtered_payload["csv"] = pd.DataFrame(filtered_records).to_csv(index=False).encode("utf-8")
+    filtered_payload["csv"] = pd.DataFrame(export_records).to_csv(index=False).encode("utf-8")
     filtered_payload["total"] = len(filtered_records)
     return filtered_payload
+
+
+def _payload_records(payload: dict | None) -> list[dict[str, Any]]:
+    """Decode payload JSON into records list."""
+    if not payload:
+        return []
+
+    raw_json = payload.get("json")
+    if raw_json is None:
+        return []
+
+    if isinstance(raw_json, (bytes, bytearray)):
+        raw_json = raw_json.decode("utf-8", errors="ignore")
+
+    try:
+        parsed = json.loads(raw_json)
+    except Exception:
+        return []
+
+    if not isinstance(parsed, list):
+        return []
+    return [item for item in parsed if isinstance(item, dict)]
+
+
+def _merge_payloads(
+    openalex_payload: dict | None,
+    extra_payload: dict | None,
+    selected_sources: list[str],
+) -> dict | None:
+    """Merge OpenAlex and non-OpenAlex payloads into one export payload."""
+    openalex_records = _payload_records(openalex_payload)
+    extra_records = _payload_records(extra_payload)
+
+    for record in openalex_records:
+        record.setdefault("Source", "OpenAlex")
+
+    combined_records = openalex_records + extra_records
+    if not combined_records:
+        return None
+
+    df = pd.DataFrame(combined_records)
+    selected_label = ", ".join(selected_sources) if selected_sources else "selected sources"
+    summary_text = f"Returned {len(df)} combined results from {selected_label}."
+
+    return {
+        "csv": df.to_csv(index=False).encode("utf-8"),
+        "json": json.dumps(
+            df.to_dict(orient="records"),
+            indent=2,
+            ensure_ascii=False,
+        ).encode("utf-8"),
+        "total": len(df),
+        "shown": len(df),
+        "summary": summary_text,
+    }
 
 
 def _bibtex_escape(value: object) -> str:
@@ -291,21 +399,94 @@ def _run_keyword_search(
     display_limit: int,
     sort_by: str,
     use_semantic_search: bool,
+    sources: list[str] | None = None,
 ) -> dict | None:
     """Run a search, cache the payload, and log it when successful."""
-    result_payload = perform_search(
-        keyword_value,
-        year_range,
-        num_results,
-        work_types=work_types,
-        language=language,
-        is_global_south=is_global_south,
-        institution_country_code=institution_country_code,
-        container=container,
-        display_limit=display_limit,
-        sort_by=sort_by,
-        use_semantic_search=use_semantic_search,
-    )
+    selected_sources = [source for source in (sources or ["OpenAlex"]) if str(source).strip()]
+    normalized_sources = {str(source).strip().lower() for source in selected_sources}
+    effective_sort_by = sort_by if sort_by in {"Relevance", "Date"} else "Relevance"
+    if "openalex" not in normalized_sources:
+        effective_sort_by = "Date"
+
+    status_display = container.empty() if container is not None else st.empty()
+    status_messages: list[str] = []
+
+    def update_search_status(message: str) -> None:
+        status_messages.append(message)
+        status_display.markdown(
+            "**Search status**\n\n" + "\n".join(f"- {item}" for item in status_messages)
+        )
+
+    openalex_payload: dict | None = None
+    extra_payload: dict | None = None
+    non_openalex_sources = [
+        source for source in selected_sources if str(source).strip().lower() in {"reliefweb", "un digital library"}
+    ]
+
+    if "openalex" in normalized_sources:
+        openalex_payload = perform_search(
+            keyword_value,
+            year_range,
+            num_results,
+            work_types=work_types,
+            language=language,
+            is_global_south=is_global_south,
+            institution_country_code=institution_country_code,
+            container=container,
+            display_limit=display_limit,
+            sort_by=effective_sort_by,
+            use_semantic_search=use_semantic_search,
+            status_callback=update_search_status,
+        )
+        if non_openalex_sources:
+            pending_labels: list[str] = []
+            if any(str(source).strip().lower() == "reliefweb" for source in non_openalex_sources):
+                pending_labels.append("ReliefWeb")
+            if any(str(source).strip().lower() == "un digital library" for source in non_openalex_sources):
+                pending_labels.append("UN Digital Library")
+            if pending_labels:
+                update_search_status(
+                    f"OpenAlex finished. Continuing with {' and '.join(pending_labels)} before combined results are returned."
+                )
+
+    if non_openalex_sources:
+        extra_payload = perform_non_openalex_search(
+            keyword_value,
+            year_range,
+            num_results,
+            sources=non_openalex_sources,
+            container=container,
+            status_callback=update_search_status,
+        )
+
+    result_payload = _merge_payloads(openalex_payload, extra_payload, selected_sources)
+    if result_payload:
+        if openalex_payload and extra_payload:
+            update_search_status("Combining results from the selected sources...")
+        update_search_status("Finished searching selected sources.")
+        summary_lines: list[str] = []
+
+        if openalex_payload:
+            openalex_total = (openalex_payload or {}).get("openalex_total")
+            openalex_total_text = str(openalex_total) if openalex_total else "an unknown number of"
+            summary_lines.append(f"- OpenAlex reports {openalex_total_text} matches.")
+
+        extra_source_totals = (extra_payload or {}).get("source_totals") or {}
+        if "ReliefWeb" in extra_source_totals:
+            summary_lines.append(f"- ReliefWeb reports {extra_source_totals['ReliefWeb']} matches.")
+        if "UN Digital Library" in extra_source_totals:
+            summary_lines.append(f"- UN Digital Library reports {extra_source_totals['UN Digital Library']} matches.")
+
+        if summary_lines:
+            retained_total = int((result_payload or {}).get("total") or 0)
+            combined_summary = (
+                "\n".join(summary_lines)
+                + "\n\nSummary:\n"
+                + f"local post-filter retained {retained_total} records in total, based on the max number. "
+                + "Json, CSV and BibTex are available for download."
+            )
+            result_payload["summary"] = combined_summary
+            status_display.success(combined_summary)
     st.session_state["last_payload"] = result_payload
     st.session_state.pop("last_analyze_triggered", None)
     st.session_state.pop("html_skipped_publications", None)
@@ -444,6 +625,13 @@ st.markdown("""
 section.main > div.block-container {
     padding-left: 20%;
     padding-right: 20%;
+}
+
+/* Center section headers across pages */
+section.main div.block-container h1,
+section.main div.block-container h2,
+section.main div.block-container h3 {
+    text-align: center;
 }
 
 /* Primary button styling */

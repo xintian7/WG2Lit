@@ -1,6 +1,7 @@
 import html
 import hashlib
 import json
+import re
 from typing import Any
 
 import streamlit as st
@@ -11,6 +12,107 @@ from utils import record_identifier
 def _safe_text(value: Any) -> str:
     """Escape a value for safe HTML rendering."""
     return html.escape(str(value or "").strip())
+
+
+def _display_cell_text(value: Any) -> str:
+    """Return escaped text or a non-breaking placeholder for empty values."""
+    text = _safe_text(value)
+    return text if text else "&nbsp;"
+
+
+def _clean_publication_date(value: Any) -> str:
+    """Return a clean YYYY-MM-DD style date string when available."""
+    if isinstance(value, dict):
+        candidates = [
+            value.get("original"),
+            value.get("created"),
+            value.get("changed"),
+        ]
+    else:
+        candidates = [value]
+
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        if not text:
+            continue
+        if "T" in text:
+            text = text.split("T", maxsplit=1)[0]
+        return text
+    return ""
+
+
+def _display_publication_datetime(rec: dict[str, Any]) -> str:
+    """Prefer a clean YYYY-MM-DD date; fall back to year when needed."""
+    clean_date = _clean_publication_date(rec.get("Publication Date"))
+    if clean_date:
+        date_match = re.search(r"(19|20)\d{2}-\d{2}-\d{2}", clean_date)
+        if date_match:
+            return date_match.group(0)
+        year_month_match = re.search(r"(19|20)\d{2}-\d{2}", clean_date)
+        if year_month_match:
+            return year_month_match.group(0)
+        year_match = re.search(r"(19|20)\d{2}", clean_date)
+        if year_match:
+            return year_match.group(0)
+        return clean_date
+
+    raw_year = str(rec.get("Publication Year") or "").strip()
+    if raw_year:
+        date_match = re.search(r"(19|20)\d{2}-\d{2}-\d{2}", raw_year)
+        if date_match:
+            return date_match.group(0)
+        year_month_match = re.search(r"(19|20)\d{2}-\d{2}", raw_year)
+        if year_month_match:
+            return year_month_match.group(0)
+        year_match = re.search(r"(19|20)\d{2}", raw_year)
+        if year_match:
+            return year_match.group(0)
+
+    return ""
+
+
+def _display_record_source(rec: dict[str, Any]) -> str:
+    """Build a human-readable source label by provider."""
+    provider = str(rec.get("Source") or "").strip()
+    journal_or_source = str(rec.get("Journal") or "").strip()
+
+    if provider.lower() == "reliefweb":
+        return f"{journal_or_source} (via ReliefWeb)" if journal_or_source else "ReliefWeb"
+
+    if provider.lower() == "un digital library":
+        return "UN Digital Library"
+
+    # OpenAlex records usually omit `Source`; infer from schema fallback.
+    if journal_or_source:
+        return f"{journal_or_source} (via OpenAlex)"
+
+    if provider:
+        return provider
+
+    return "OpenAlex"
+
+
+def _display_url_label(rec: dict[str, Any]) -> str:
+    """Return source-specific URL label for preview cards."""
+    provider = str(rec.get("Source") or "").strip().lower()
+    if provider == "reliefweb":
+        return "ReliefWeb URL"
+    if provider == "un digital library":
+        return "UN DL URL"
+    return "OpenAlex URL"
+
+
+def _display_record_url(rec: dict[str, Any]) -> str:
+    """Return a display URL, normalizing UN DL file links to record pages."""
+    raw_url = str(rec.get("OpenAlex URL") or rec.get("URL") or "").strip()
+    provider = str(rec.get("Source") or "").strip().lower()
+
+    if provider == "un digital library":
+        match = re.search(r"/record/(\d+)", raw_url)
+        if match:
+            return f"https://digitallibrary.un.org/record/{match.group(1)}"
+
+    return raw_url
 
 
 def _record_hash(rec_id: str) -> str:
@@ -118,15 +220,16 @@ def render_html_preview(
 
         title = _safe_text(rec.get("Title"))
         work_type = _safe_text(rec.get("Type"))
-        year = _safe_text(rec.get("Publication Year"))
-        citation = _safe_text(rec.get("Citations"))
-        doi = _safe_text(rec.get("DOI"))
+        publication_datetime = _display_cell_text(_display_publication_datetime(rec))
+        citation = _display_cell_text(rec.get("Citations"))
+        doi = _display_cell_text(rec.get("DOI"))
         relevance = _safe_text(rec.get("Relevance Score"))
-        openalex_url = _safe_text(rec.get("OpenAlex URL"))
-        authors = _safe_text(rec.get("Authors"))
-        topics = _safe_text(rec.get("Topics"))
-        keywords = _safe_text(rec.get("Keywords"))
-        abstract = _safe_text(rec.get("Abstract"))
+        openalex_url = _safe_text(_display_record_url(rec))
+        source = _display_cell_text(_display_record_source(rec))
+        authors = _display_cell_text(rec.get("Authors"))
+        topics = _display_cell_text(rec.get("Topics"))
+        keywords = _display_cell_text(rec.get("Keywords"))
+        abstract = _display_cell_text(rec.get("Abstract"))
 
         relevance_row = ""
         view_btn = ""
@@ -136,28 +239,64 @@ def render_html_preview(
             )
 
         if relevance or openalex_url:
-            url_part = f", <span class=\"html-preview-label\">OpenAlex URL</span>: {openalex_url}" if openalex_url else ""
-            relevance_row = (
-                f'<div class="html-preview-row"><span class="html-preview-label">Relevance Score</span>: {relevance}{url_part}{view_btn}</div>'
-            )
+            row_parts: list[str] = []
+            if relevance:
+                row_parts.append(f'<span class="html-preview-label">Relevance Score</span>: {relevance}')
+            if openalex_url:
+                url_label = _display_url_label(rec)
+                row_parts.append(f'<span class="html-preview-label">{url_label}</span>: {openalex_url} {view_btn}')
+            relevance_row = f'<div class="html-preview-row">{", ".join(row_parts)}</div>'
 
+        provider = str(rec.get("Source") or "").strip().lower()
+        is_reliefweb = provider == "reliefweb"
+        is_un_digital_library = provider == "un digital library"
         abstract_row = ""
-        if not hide_abstracts:
+        if not is_reliefweb and not hide_abstracts and abstract != "&nbsp;":
             abstract_row = (
                 f'<div class="html-preview-row"><span class="html-preview-label">Abstract</span>: {abstract}</div>'
             )
 
-        card_html = f"""
-        <div class="html-preview-card">
-            <div class="html-preview-row"><span class="html-preview-label">Title</span>: {title}, <span class="html-preview-label">Type</span>: {work_type}</div>
-            <div class="html-preview-row"><span class="html-preview-label">Year</span>: {year}, <span class="html-preview-label">Citation</span>: {citation}, <span class="html-preview-label">Doi</span>: {doi}</div>
-            {relevance_row}
-            <div class="html-preview-row"><span class="html-preview-label">Authors</span>: {authors}</div>
-            <div class="html-preview-row"><span class="html-preview-label">Topic</span>: {topics}</div>
-            <div class="html-preview-row"><span class="html-preview-label">Keywords</span>: {keywords}</div>
-            {abstract_row}
-        </div>
-        """
+        date_row_parts = [f'<span class="html-preview-label">Datetime</span>: {publication_datetime}']
+        if not is_reliefweb:
+            date_row_parts.append(f'<span class="html-preview-label">Citation</span>: {citation}')
+            date_row_parts.append(f'<span class="html-preview-label">Doi</span>: {doi}')
+        date_row_html = ", ".join(date_row_parts)
+
+        source_row = f'<div class="html-preview-row"><span class="html-preview-label">Source</span>: {source}</div>'
+        authors_row = (
+            ""
+            if is_reliefweb
+            else f'<div class="html-preview-row"><span class="html-preview-label">Authors</span>: {authors}</div>'
+        )
+        topics_row = f'<div class="html-preview-row"><span class="html-preview-label">Topic</span>: {topics}</div>'
+        keywords_row = (
+            ""
+            if is_reliefweb or is_un_digital_library
+            else f'<div class="html-preview-row"><span class="html-preview-label">Keywords</span>: {keywords}</div>'
+        )
+        if not is_reliefweb and not hide_abstracts:
+            abstract_row = (
+                f'<div class="html-preview-row"><span class="html-preview-label">Abstract</span>: {abstract}</div>'
+            )
+
+        card_rows = [
+            f'<div class="html-preview-row"><span class="html-preview-label">Title</span>: {title}, <span class="html-preview-label">Type</span>: {work_type}</div>',
+            f'<div class="html-preview-row">{date_row_html}</div>',
+        ]
+        if relevance_row:
+            card_rows.append(relevance_row)
+        if source_row:
+            card_rows.append(source_row)
+        if authors_row:
+            card_rows.append(authors_row)
+        if topics_row:
+            card_rows.append(topics_row)
+        if keywords_row:
+            card_rows.append(keywords_row)
+        if abstract_row:
+            card_rows.append(abstract_row)
+
+        card_html = '<div class="html-preview-card">' + ''.join(card_rows) + '</div>'
 
         display.markdown(card_html, unsafe_allow_html=True)
 

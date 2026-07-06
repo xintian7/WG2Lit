@@ -1,6 +1,7 @@
 """UN Digital Library HTTP client helpers with retry and pagination behavior."""
 
 import logging
+import re
 import time
 from typing import Any
 from xml.etree import ElementTree as ET
@@ -90,20 +91,47 @@ def build_query(
     from_year: int | None,
     to_year: int | None,
 ) -> str:
-    """Build Invenio-style query string for UN Digital Library."""
-    parts: list[str] = []
+    """Build a website-aligned free-text query string for UN Digital Library."""
+    del from_year, to_year
+    return str(search or "").strip()
 
-    if search and search.strip():
-        parts.append(search.strip())
 
-    if from_year is not None and to_year is not None:
-        parts.append(f"269:{from_year}->{to_year}")
-    elif from_year is not None:
-        parts.append(f"269:{from_year}->9999")
-    elif to_year is not None:
-        parts.append(f"269:0->{to_year}")
+def _record_id(record: ET.Element) -> str:
+    """Extract the MARC record identifier used for deduplication."""
+    return record.findtext(f"{{{MARC_NS}}}controlfield[@tag='001']") or ""
 
-    return " AND ".join(parts)
+
+def _extract_total_count_from_html(html_text: str) -> int | None:
+    """Parse the search-result count from the UN Digital Library HTML page."""
+    match = re.search(r"<strong>([0-9,]+)</strong>\s+records found", html_text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return int(match.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def fetch_total_count(
+    *,
+    search: str | None,
+    timeout: int = 30,
+) -> int:
+    """Fetch the website-style total count for a UN Digital Library query."""
+    query = build_query(search=search, from_year=None, to_year=None)
+    if not query:
+        raise ValueError("Provide search text to fetch a UN Digital Library total count.")
+
+    params = {
+        "ln": "en",
+        "p": query,
+        "rg": 1,
+        "so": "d",
+        "fti": 0,
+    }
+    response = request_un_digital_library(params, timeout=timeout)
+    total_count = _extract_total_count_from_html(response.text)
+    return total_count if total_count is not None else 0
 
 
 def fetch_paginated(
@@ -124,6 +152,7 @@ def fetch_paginated(
 
     jrec = 1
     collected: list[ET.Element] = []
+    seen_record_ids: set[str] = set()
     first_page = True
 
     while len(collected) < limit:
@@ -135,10 +164,12 @@ def fetch_paginated(
         first_page = False
 
         params = {
+            "ln": "en",
             "p": query,
             "of": "xm",
             "jrec": jrec,
             "rg": current_page_size,
+            "so": "d",
         }
         response = request_un_digital_library(params, timeout=timeout)
         try:
@@ -152,7 +183,19 @@ def fetch_paginated(
         if not batch:
             break
 
-        collected.extend(batch)
+        new_records: list[ET.Element] = []
+        for record in batch:
+            record_id = _record_id(record)
+            dedupe_key = record_id or str(len(collected) + len(new_records))
+            if dedupe_key in seen_record_ids:
+                continue
+            seen_record_ids.add(dedupe_key)
+            new_records.append(record)
+
+        if not new_records:
+            break
+
+        collected.extend(new_records)
         if len(batch) < current_page_size:
             break
 
@@ -170,12 +213,14 @@ def fetch_results_with_count(
     page_size: int = 200,
     timeout: int = 30,
 ) -> tuple[list[ET.Element], int]:
-    """Fetch UN Digital Library records with best-effort total count.
-
-    The API does not consistently expose total count in the MARCXML response,
-    so the second value is currently the fetched-record count.
-    """
+    """Fetch UN Digital Library records with website-aligned total count."""
     _validate_pagination(limit, page_size)
+
+    try:
+        total_count = fetch_total_count(search=search, timeout=timeout)
+    except (requests.RequestException, ValueError, TypeError) as exc:
+        logger.warning("UN Digital Library total-count request failed; falling back to 0 total.", exc_info=exc)
+        total_count = 0
 
     records = fetch_paginated(
         search=search,
@@ -185,4 +230,4 @@ def fetch_results_with_count(
         page_size=page_size,
         timeout=timeout,
     )
-    return records, len(records)
+    return records, total_count

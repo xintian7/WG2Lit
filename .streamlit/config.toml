@@ -1,0 +1,7 @@
+[client]
+showSidebarNavigation = false
+
+[server]
+# Polling is more reliable than filesystem events in synced folders like Dropbox.
+fileWatcherType = "poll"
+runOnSave = true

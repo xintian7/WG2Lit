@@ -3,7 +3,7 @@ import streamlit as st
 
 def render_todo_page() -> None:
     st.divider()
-    st.markdown("# Development Plan")
+    st.markdown("# Development Plan (for TSU's use)")
     st.checkbox("General maintenance after LAM2 (v0.1b)", value=True, key="todo_auth_gs")
     st.checkbox("Zotero integration (v0.2)", value=True, key="todo_zotero")
     st.checkbox("Add multi-page tabs (v0.2)", value=False, key="todo_multi_page")

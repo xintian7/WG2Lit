@@ -14,6 +14,39 @@ def render_literature_search_page(
     st.divider()
     st.markdown("# Literature Search")
 
+    # Data source: label+help line, then control line
+    label_col, help_col = st.columns([1, 4])
+    with label_col:
+        st.markdown("**Data source**")
+    with help_col:
+        st.caption(
+            "Select one or more sources."
+        )
+    src_col1, src_col2 = st.columns([1, 4])
+    with src_col1:
+        st.write("")
+    with src_col2:
+        st.markdown(
+            "- [**OpenAlex**](https://openalex.org/) is a fully open catalog of the global research system - hundreds of millions of scholarly works, authors, institutions, and more.\n"
+            "- [**ReliefWeb**](https://reliefweb.int/) is the leading humanitarian information service provided by the United Nations Office for the Coordination of Humanitarian Affairs (OCHA).\n"
+            "- [**United Nations Digital Library**](https://digitallibrary.un.org/) is a primary bibliographic database of the United Nations established in 1979. It consists of the official documents and publications produced by the UN System."
+        )
+        selected_sources = st.multiselect(
+            "",
+            options=["OpenAlex", "ReliefWeb", "UN Digital Library"],
+            default=["OpenAlex"],
+            label_visibility="collapsed",
+            key="search_sources",
+        )
+
+    if not selected_sources:
+        st.warning("Please select at least one data source.")
+        return
+
+    normalized_sources = {source.strip().lower() for source in selected_sources}
+    openalex_selected = "openalex" in normalized_sources
+    openalex_only_selected = normalized_sources == {"openalex"}
+
     # Keyword: label+help line, then control line
     label_col, help_col = st.columns([1, 4])
     with label_col:
@@ -34,12 +67,18 @@ def render_literature_search_page(
         st.write("")
     with kw_col2:
         keyword = st.text_input("", value="climate change", label_visibility="collapsed", key="kw")
-        use_semantic_search = st.checkbox(
-            "Semantic search",
-            value=False,
-            key="semantic_search",
-            help="If checked, use semantic search (broader, AI-powered matching). If unchecked, use regular Boolean search (more precise, keyword-based). Note: Semantic search does not support country/institution filters. Reference: https://developers.openalex.org/guides/semantic-search",
-        )
+        if openalex_selected:
+            use_semantic_search = st.checkbox(
+                "Semantic search",
+                value=False,
+                key="semantic_search",
+                help="If checked, apply semantic search to OpenAlex only (broader, AI-powered matching). Other selected sources continue to use their regular keyword search. If unchecked, OpenAlex also uses regular Boolean search. Note: Semantic search does not support country/institution filters. Reference: https://developers.openalex.org/guides/semantic-search",
+            )
+            if not openalex_only_selected:
+                st.caption("When Semantic search is enabled, it applies to OpenAlex only. ReliefWeb and UN Digital Library continue to use regular keyword search.")
+        else:
+            use_semantic_search = False
+            st.caption("Semantic search is currently available for OpenAlex only.")
 
     # Publication year: label+help line, then slider line
     label_col, help_col = st.columns([1, 4])
@@ -51,16 +90,25 @@ def render_literature_search_page(
     with yr_col1:
         st.write("")
     with yr_col2:
-        year_range = st.slider("", 1900, 2027, (2000, 2025), label_visibility="collapsed", key="yr")
+        year_range = st.slider("", 1900, 2027, (2000, 2027), label_visibility="collapsed", key="yr")
 
-    # Type: label+help line, then multiselect line
+    # OpenAlex-only filters
+    work_types: list[str] = []
+    selected_language: str | None = None
+    language_option = "Any"
+    selected_member_state: str | None = None
+    selected_member_state_code: str | None = None
+
+    # Type: always visible; applies to OpenAlex only.
     label_col, help_col = st.columns([1, 4])
     with label_col:
-        st.markdown("**Type**")
+        st.markdown("**Type (OpenAlex only)**" if not openalex_only_selected else "**Type**")
     with help_col:
         st.caption(
             f"Due to processing time, you can select up to {max_work_types} categories at one time. "
             "It will be improved in a future version to allow more categories."
+            + (" This filter only applies to OpenAlex due to the API constraint from other sources." if openalex_selected else "")
+            + (" Select OpenAlex in Data source to enable this filter." if not openalex_selected else "")
         )
     type_col1, type_col2 = st.columns([1, 4])
     with type_col1:
@@ -92,84 +140,91 @@ def render_literature_search_page(
             default=["report"],
             label_visibility="collapsed",
             key="wt",
+            disabled=not openalex_selected,
         )
         if work_types and len(work_types) > max_work_types:
             st.warning(f"You selected more than {max_work_types} types — only the first {max_work_types} will be used.")
             work_types = work_types[:max_work_types]
 
-    # Language: label+help line, then control line
-    label_col, help_col = st.columns([1, 4])
-    with label_col:
-        st.markdown("**Language**")
-    with help_col:
-        st.caption("Filter results by language. Default is English. When selecting other languages, the keywords can be in the selected language or in English, which will give different results. We are working on a future version to allow more flexible combinations of languages and keywords.")
-    lang_col1, lang_col2 = st.columns([1, 4])
-    with lang_col1:
-        st.write("")
-    with lang_col2:
-        language_option = st.selectbox(
-            "",
-            options=[
-                "Any",
-                "English",
-                "Arabic",
-                "Chinese",
-                "French",
-                "Russian",
-                "Spanish",
-            ],
-            index=1,
-            label_visibility="collapsed",
-            key="lang",
-        )
-        language_code_map = {
-            "Any": None,
-            "English": "en",
-            "Arabic": "ar",
-            "Chinese": "zh",
-            "French": "fr",
-            "Russian": "ru",
-            "Spanish": "es",
-        }
-        selected_language = language_code_map.get(language_option)
+    if openalex_only_selected:
+        # Language: label+help line, then control line
+        label_col, help_col = st.columns([1, 4])
+        with label_col:
+            st.markdown("**Language**")
+        with help_col:
+            st.caption("Filter results by language. Default is English. When selecting other languages, the keywords can be in the selected language or in English, which will give different results. We are working on a future version to allow more flexible combinations of languages and keywords.")
+        lang_col1, lang_col2 = st.columns([1, 4])
+        with lang_col1:
+            st.write("")
+        with lang_col2:
+            language_option = st.selectbox(
+                "",
+                options=[
+                    "Any",
+                    "English",
+                    "Arabic",
+                    "Chinese",
+                    "French",
+                    "Russian",
+                    "Spanish",
+                ],
+                index=1,
+                label_visibility="collapsed",
+                key="lang",
+            )
+            language_code_map = {
+                "Any": None,
+                "English": "en",
+                "Arabic": "ar",
+                "Chinese": "zh",
+                "French": "fr",
+                "Russian": "ru",
+                "Spanish": "es",
+            }
+            selected_language = language_code_map.get(language_option)
 
     filter_global_south = False
 
-    # UN member states: label+help line, then control line
-    label_col, help_col = st.columns([1, 4])
-    with label_col:
-        st.markdown("**UN member states**")
-    with help_col:
-        st.caption(
-            "Filter results to works where **at least one institution/affiliation of this publication is from the selected UN member state** "
-            "([UN member states](https://www.un.org/en/about-us/member-states)). "
-            "When this filter is not applied, results will include works from any state worldwide."
-        )
-    state_col1, state_col2 = st.columns([1, 4])
-    with state_col1:
-        st.write("")
-    with state_col2:
-        selected_member_state = st.selectbox(
-            "",
-            options=un_member_states,
-            index=None,
-            placeholder="You can leave this field empty to include works from all states.",
-            label_visibility="collapsed",
-            key="un_member_state",
-        )
-        selected_member_state_code = un_member_state_to_country_code.get(selected_member_state or "")
+    if openalex_only_selected:
+        # UN member states: label+help line, then control line
+        label_col, help_col = st.columns([1, 4])
+        with label_col:
+            st.markdown("**UN member states**")
+        with help_col:
+            st.caption(
+                "Filter results to works where **at least one institution/affiliation of this publication is from the selected UN member state** "
+                "([UN member states](https://www.un.org/en/about-us/member-states)). "
+                "When this filter is not applied, results will include works from any state worldwide."
+            )
+        state_col1, state_col2 = st.columns([1, 4])
+        with state_col1:
+            st.write("")
+        with state_col2:
+            selected_member_state = st.selectbox(
+                "",
+                options=un_member_states,
+                index=None,
+                placeholder="You can leave this field empty to include works from all states.",
+                label_visibility="collapsed",
+                key="un_member_state",
+            )
+            selected_member_state_code = un_member_state_to_country_code.get(selected_member_state or "")
+    elif openalex_selected:
+        st.caption("Language and UN member states are hidden unless OpenAlex is the only selected source. Type is still available above and applies only to OpenAlex.")
+    else:
+        st.caption("OpenAlex-only filters (Type, Language, UN member states, Semantic search) are hidden because OpenAlex is not selected.")
 
     # Number of results: label line then control line
     label_col, help_col = st.columns([1, 4])
     with label_col:
-        st.markdown("**Max Number**")
+        st.markdown("**Max Number / Source**")
     with help_col:
-        st.caption("Select the maximum number of results to return (max 5000 for the time being). More results take longer to load.")
+        st.caption("Select the maximum number of results to return per selected data source (max 5000 for each source). For example, if 3 sources are selected and Max Number is 500, the theoretical maximum is 1500 results before filtering and deduplication. More results take longer to load.")
     nr_col1, nr_col2 = st.columns([1, 4])
     with nr_col1:
         st.write("")
     with nr_col2:
-        num_results = st.slider("", 1, 5000, 500, label_visibility="collapsed", key="nr")
+        num_results = st.slider("", 1, 1000, 200, label_visibility="collapsed", key="nr")
 
     sort_by = st.session_state.get("sb", "Relevance")
 
@@ -178,7 +233,7 @@ def render_literature_search_page(
         did_search = False
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            if st.button("Search OpenAlex", key="main_search_button", type="primary", use_container_width=True):
+            if st.button("Search Selected Source(s)", key="main_search_button", type="primary", use_container_width=True):
                 normalized_keyword, needs_review, explanation = normalize_keyword_query(keyword)
                 if needs_review and not use_semantic_search:
                     st.session_state["keyword_search_request"] = {
@@ -194,6 +249,7 @@ def render_literature_search_page(
                         "display_limit": 5,
                         "sort_by": sort_by,
                         "use_semantic_search": use_semantic_search,
+                        "sources": selected_sources,
                     }
                     st.session_state["keyword_search_review"] = {
                         "original": keyword,
@@ -221,6 +277,7 @@ def render_literature_search_page(
                         5,
                         sort_by,
                         use_semantic_search,
+                        selected_sources,
                     )
         with c2:
             st.write("")
@@ -257,6 +314,7 @@ def render_literature_search_page(
                 pending_request.get("display_limit", 5),
                 pending_request.get("sort_by", sort_by),
                 pending_request.get("use_semantic_search", use_semantic_search),
+                pending_request.get("sources", selected_sources),
             )
             st.session_state.pop("keyword_search_request", None)
             st.session_state.pop("keyword_search_review", None)

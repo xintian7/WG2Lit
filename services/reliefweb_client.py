@@ -116,14 +116,13 @@ def build_reliefweb_payload(
     payload: dict[str, Any] = {
         "limit": limit,
         "offset": offset,
+        "preset": "latest",
         "fields": {"include": RELIEFWEB_INCLUDE_FIELDS},
     }
 
     if search and search.strip():
         payload["query"] = {
             "value": search.strip(),
-            "fields": ["title", "body"],
-            "operator": "AND",
         }
 
     date_value: dict[str, str] = {}

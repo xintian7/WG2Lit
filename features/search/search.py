@@ -1,6 +1,8 @@
 import json
 import re
+from contextlib import nullcontext
 from typing import Any
+from xml.etree import ElementTree as ET
 
 import pandas as pd
 import streamlit as st
@@ -10,6 +12,582 @@ from services.openalex_client import (
     extract_status_code,
     fetch_results_with_count,
 )
+from services.reliefweb_client import (
+    extract_status_code as extract_reliefweb_status_code,
+    fetch_results_with_count as fetch_reliefweb_results_with_count,
+)
+from services.un_digital_library_client import (
+    MARC_NS,
+    extract_status_code as extract_un_digital_library_status_code,
+    fetch_results_with_count as fetch_un_digital_library_results_with_count,
+)
+
+
+def _first_non_empty(values: list[Any]) -> str:
+    """Return the first non-empty string value."""
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def _join_non_empty(values: list[Any], separator: str = "; ") -> str:
+    """Join non-empty values using the given separator."""
+    cleaned = [str(v).strip() for v in values if str(v or "").strip()]
+    return separator.join(cleaned)
+
+
+def _safe_reliefweb_list(raw_value: Any) -> list[dict[str, Any]]:
+    """Normalize ReliefWeb list-like fields to a list of dict objects."""
+    if isinstance(raw_value, list):
+        return [item for item in raw_value if isinstance(item, dict)]
+    if isinstance(raw_value, dict):
+        return [raw_value]
+    return []
+
+
+def _reliefweb_first_paragraph(raw_body: Any) -> str:
+    """Extract the first paragraph from ReliefWeb body text/HTML."""
+    text = str(raw_body or "").strip()
+    if not text:
+        return ""
+
+    # Convert common HTML paragraph breaks to newlines before stripping tags.
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</p\s*>", "\n\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<p[^>]*>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    paragraphs = [
+        re.sub(r"\s+", " ", paragraph).strip()
+        for paragraph in re.split(r"\n\s*\n", text)
+        if paragraph.strip()
+    ]
+    if paragraphs:
+        return paragraphs[0]
+
+    # Fallback when no explicit paragraph break exists.
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _normalize_reliefweb_records(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize ReliefWeb records into the app's tabular export schema."""
+    normalized: list[dict[str, Any]] = []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        fields = item.get("fields") if isinstance(item.get("fields"), dict) else {}
+
+        title = _first_non_empty([
+            fields.get("title"),
+            (fields.get("headline") or {}).get("title") if isinstance(fields.get("headline"), dict) else None,
+        ])
+        headline_summary = (
+            (fields.get("headline") or {}).get("summary")
+            if isinstance(fields.get("headline"), dict)
+            else None
+        )
+        body_first_paragraph = _reliefweb_first_paragraph(
+            _first_non_empty([
+                fields.get("body"),
+                fields.get("body-html"),
+                fields.get("body_html"),
+            ])
+        )
+        abstract = _first_non_empty([
+            headline_summary,
+            body_first_paragraph,
+        ])
+
+        source_names = [entry.get("name") for entry in _safe_reliefweb_list(fields.get("source"))]
+        language_names = [entry.get("name") for entry in _safe_reliefweb_list(fields.get("language"))]
+        format_names = [entry.get("name") for entry in _safe_reliefweb_list(fields.get("format"))]
+        theme_names = [entry.get("name") for entry in _safe_reliefweb_list(fields.get("theme"))]
+
+        raw_publication_date = fields.get("date")
+        if isinstance(raw_publication_date, dict):
+            publication_date = _first_non_empty([
+                raw_publication_date.get("original"),
+                raw_publication_date.get("created"),
+                raw_publication_date.get("changed"),
+            ])
+        else:
+            publication_date = str(raw_publication_date or "").strip()
+        if "T" in publication_date:
+            publication_date = publication_date.split("T", maxsplit=1)[0]
+        publication_year = ""
+        if publication_date:
+            publication_year = publication_date[:4]
+
+        url = _first_non_empty([
+            fields.get("url"),
+            fields.get("url_alias"),
+        ])
+
+        normalized.append({
+            "Source": "ReliefWeb",
+            "OpenAlex": f'<a href="{url}" target="_blank">View</a>' if url else "",
+            "OpenAlex URL": url,
+            "Title": title,
+            "Publication Date": publication_date,
+            "Publication Year": publication_year,
+            "Journal": _join_non_empty(source_names),
+            "Type": _join_non_empty(format_names),
+            "Authors": "",
+            "Open Access": "",
+            "OA Status": "",
+            "Citations": "",
+            "DOI": "",
+            "Relevance Score": "",
+            "Keywords": _join_non_empty(theme_names),
+            "Topics": _join_non_empty(theme_names),
+            "Abstract": abstract,
+            "Publisher": _join_non_empty(source_names),
+            "URL": url,
+            "Language": _join_non_empty(language_names),
+        })
+
+    return normalized
+
+
+def _marc_subfield_values(record: ET.Element, tag: str, code: str) -> list[str]:
+    """Extract MARCXML subfield values for one datafield tag/code pair."""
+    values: list[str] = []
+    for datafield in record.findall(f"{{{MARC_NS}}}datafield[@tag='{tag}']"):
+        for subfield in datafield.findall(f"{{{MARC_NS}}}subfield[@code='{code}']"):
+            text = str(subfield.text or "").strip()
+            if text:
+                values.append(text)
+    return values
+
+
+def _marc_controlfield_value(record: ET.Element, tag: str) -> str:
+    """Extract one MARCXML controlfield value by tag."""
+    field = record.find(f"{{{MARC_NS}}}controlfield[@tag='{tag}']")
+    if field is None:
+        return ""
+    return str(field.text or "").strip()
+
+
+def _extract_un_year(record: ET.Element) -> str:
+    """Extract publication year from MARC fields when available."""
+    year_candidates: list[str] = []
+    for tag, code in (("269", "a"), ("269", "c"), ("260", "c"), ("264", "c")):
+        year_candidates.extend(_marc_subfield_values(record, tag, code))
+
+    for candidate in year_candidates:
+        match = re.search(r"(19|20)\d{2}", candidate)
+        if match:
+            return match.group(0)
+    return ""
+
+
+def _extract_un_record_url(record: ET.Element) -> str:
+    """Prefer the UN Digital Library record page URL over file attachment URLs."""
+    record_id = _marc_controlfield_value(record, "001")
+    if record_id.isdigit():
+        return f"https://digitallibrary.un.org/record/{record_id}"
+    return _first_non_empty(_marc_subfield_values(record, "856", "u"))
+
+
+def _normalize_un_digital_library_records(records: list[ET.Element]) -> list[dict[str, Any]]:
+    """Normalize UN Digital Library MARC records to the app's export schema."""
+    normalized: list[dict[str, Any]] = []
+    for record in records:
+        if not isinstance(record, ET.Element):
+            continue
+
+        title = _join_non_empty(
+            _marc_subfield_values(record, "245", "a") + _marc_subfield_values(record, "245", "b"),
+            separator=" ",
+        )
+        source = _first_non_empty(
+            _marc_subfield_values(record, "773", "t") + _marc_subfield_values(record, "490", "a")
+        )
+        authors = _join_non_empty(
+            _marc_subfield_values(record, "100", "a")
+            + _marc_subfield_values(record, "110", "a")
+            + _marc_subfield_values(record, "700", "a")
+            + _marc_subfield_values(record, "710", "a"),
+            separator=", ",
+        )
+        abstract = _join_non_empty(_marc_subfield_values(record, "520", "a"), separator=" ")
+        topics = _join_non_empty(_marc_subfield_values(record, "650", "a"))
+        url = _extract_un_record_url(record)
+        doi = _first_non_empty(_marc_subfield_values(record, "024", "a"))
+
+        publication_year = _extract_un_year(record)
+
+        normalized.append({
+            "Source": "UN Digital Library",
+            "OpenAlex": f'<a href="{url}" target="_blank">View</a>' if url else "",
+            "OpenAlex URL": url,
+            "Title": title,
+            "Publication Date": publication_year,
+            "Publication Year": publication_year,
+            "Journal": source,
+            "Type": "UN Document",
+            "Authors": authors,
+            "Open Access": "",
+            "OA Status": "",
+            "Citations": "",
+            "DOI": doi,
+            "Relevance Score": "",
+            "Keywords": topics,
+            "Topics": topics,
+            "Abstract": abstract,
+            "Publisher": "United Nations",
+            "URL": url,
+            "Language": "",
+        })
+
+    return normalized
+
+
+def _build_normalized_record_text_blob(record: dict[str, Any]) -> str:
+    """Build a lowercase text blob from normalized record fields."""
+    fields = [
+        record.get("Title"),
+        record.get("Abstract"),
+        record.get("Keywords"),
+        record.get("Topics"),
+        record.get("Journal"),
+        record.get("Publisher"),
+    ]
+    return " ".join(str(value or "") for value in fields).lower()
+
+
+def _normalized_record_matches_local_filters(
+    record: dict[str, Any],
+    *,
+    keyword_expr: str,
+    year_range: tuple[int, int],
+) -> bool:
+    """Apply local post-filters to normalized (non-OpenAlex) records."""
+    if not _normalized_record_matches_year_range(record, year_range=year_range):
+        return False
+
+    provider = str(record.get("Source") or "").strip().lower()
+    if provider == "un digital library":
+        return True
+
+    return _normalized_record_matches_keyword_expr(record, keyword_expr=keyword_expr)
+
+
+def _normalized_record_matches_year_range(
+    record: dict[str, Any],
+    *,
+    year_range: tuple[int, int],
+) -> bool:
+    """Apply the local year-range guard to normalized records."""
+    start_year, end_year = year_range
+
+    pub_year = str(record.get("Publication Year") or "").strip()
+    if pub_year.isdigit():
+        year_value = int(pub_year)
+        if year_value < start_year or year_value > end_year:
+            return False
+
+    return True
+
+
+def _normalized_record_matches_keyword_expr(
+    record: dict[str, Any],
+    *,
+    keyword_expr: str,
+) -> bool:
+    """Evaluate the local boolean keyword expression against normalized record text."""
+
+    blob = _build_normalized_record_text_blob(record)
+    tokens = _tokenize_boolean_query(keyword_expr)
+    if not tokens:
+        return True
+
+    try:
+        expression_tokens = _insert_implicit_and(tokens)
+        rpn = _to_rpn(expression_tokens)
+        stack: list[bool] = []
+        for token in rpn:
+            if token in ("AND", "OR"):
+                if len(stack) < 2:
+                    return False
+                right = stack.pop()
+                left = stack.pop()
+                stack.append(left and right if token == "AND" else left or right)
+            else:
+                stack.append(token in blob)
+        return len(stack) == 1 and bool(stack[0])
+    except ValueError:
+        literals = _extract_literals(tokens)
+        if not literals:
+            return True
+        return all(literal.lower() in blob for literal in literals)
+
+
+def _build_reliefweb_query_value(keyword_expr: str) -> str:
+    """Translate app boolean input into ReliefWeb query syntax."""
+    raw_query = str(keyword_expr or "").strip()
+    if not raw_query:
+        return ""
+
+    tokens = _tokenize_boolean_query(raw_query)
+    if not tokens:
+        return raw_query
+
+    translated: list[str] = []
+
+    def is_operand(token: str) -> bool:
+        upper = token.upper()
+        return token not in ("(", ")") and upper not in ("AND", "OR")
+
+    for index, token in enumerate(tokens):
+        upper = token.upper()
+        normalized_token = upper if upper in ("AND", "OR") else token
+
+        if index > 0:
+            previous = translated[-1]
+            if (is_operand(previous) or previous == ")") and (is_operand(normalized_token) or normalized_token == "("):
+                translated.append("AND")
+
+        translated.append(normalized_token)
+
+    return " ".join(translated)
+
+
+def _normalized_record_date_sort_key(record: dict[str, Any]) -> tuple[int, str]:
+    """Build a descending-friendly sort key from normalized publication date text."""
+    publication_date = str(record.get("Publication Date") or "").strip()
+    publication_year = str(record.get("Publication Year") or "").strip()
+    normalized = publication_date or publication_year
+    digits_only = "".join(ch for ch in normalized if ch.isdigit())
+    numeric_key = int(digits_only[:8]) if digits_only else 0
+    return numeric_key, normalized
+
+
+def _openalex_matches_local_filters(
+    work: dict[str, Any],
+    *,
+    keyword_expr: str,
+    year_range: tuple[int, int],
+    work_types: list[str] | None,
+    language: str | None,
+    is_global_south: bool,
+    institution_country_code: str | None,
+    use_semantic_search: bool,
+) -> bool:
+    """Apply a local post-filter pass after OpenAlex API results are fetched."""
+    start_year, end_year = year_range
+
+    publication_year = work.get("publication_year")
+    if isinstance(publication_year, int):
+        if publication_year < start_year or publication_year > end_year:
+            return False
+
+    if work_types:
+        work_type = str(work.get("type") or "")
+        if work_type and work_type not in work_types:
+            return False
+
+    if language:
+        work_language = str(work.get("language") or "")
+        if work_language and work_language != language:
+            return False
+
+    if institution_country_code or is_global_south:
+        has_matching_country = False
+        has_global_south = False
+        authorships = work.get("authorships") or []
+        if isinstance(authorships, list):
+            for authorship in authorships:
+                institutions = (authorship or {}).get("institutions") or []
+                if not isinstance(institutions, list):
+                    continue
+                for institution in institutions:
+                    if not isinstance(institution, dict):
+                        continue
+                    if institution_country_code and institution.get("country_code") == institution_country_code:
+                        has_matching_country = True
+                    if is_global_south and bool(institution.get("is_global_south")):
+                        has_global_south = True
+        if institution_country_code and not has_matching_country:
+            return False
+        if is_global_south and not has_global_south:
+            return False
+
+    # Semantic search is intentionally broader; rely on API semantics for keyword matching.
+    if use_semantic_search:
+        return True
+
+    tokens = _tokenize_boolean_query(keyword_expr)
+    if not tokens:
+        return True
+
+    try:
+        expression_tokens = _insert_implicit_and(tokens)
+        rpn = _to_rpn(expression_tokens)
+        return _evaluate_rpn_expression(work, rpn)
+    except ValueError:
+        literals = _extract_literals(tokens)
+        if not literals:
+            return True
+        return _matches_all_keywords(work, literals)
+
+
+def perform_non_openalex_search(
+    keyword: str,
+    year_range: tuple[int, int],
+    num_results: int,
+    *,
+    sources: list[str],
+    container: Any = None,
+    status_callback=None,
+    emit_ui: bool = True,
+) -> dict[str, Any] | None:
+    """Search ReliefWeb and/or UN Digital Library and return a combined payload."""
+    display = container if container is not None else st
+
+    if not keyword or not keyword.strip():
+        st.warning("Please enter a keyword for the search.")
+        return None
+    if not year_range or len(year_range) != 2:
+        st.warning("Please select a valid publication year range.")
+        return None
+
+    normalized_sources = {str(source).strip().lower() for source in (sources or []) if str(source).strip()}
+    selected_non_openalex_sources = [
+        source for source in normalized_sources if source in {"reliefweb", "un digital library"}
+    ]
+    if not selected_non_openalex_sources:
+        return None
+
+    start_year, end_year = year_range
+    requested_n = max(int(num_results), 1)
+    reliefweb_query = _build_reliefweb_query_value(keyword)
+
+    combined_records: list[dict[str, Any]] = []
+    source_totals: dict[str, int] = {}
+
+    spinner_context = st.spinner("Searching selected non-OpenAlex sources...") if emit_ui else nullcontext()
+    with spinner_context:
+        if "reliefweb" in selected_non_openalex_sources:
+            try:
+                if callable(status_callback):
+                    status_callback("Searching ReliefWeb...")
+                reliefweb_results, reliefweb_total = fetch_reliefweb_results_with_count(
+                    search=reliefweb_query,
+                    from_year=start_year,
+                    to_year=end_year,
+                    limit=requested_n,
+                    page_size=min(200, requested_n),
+                    timeout=30,
+                )
+                reliefweb_records = _normalize_reliefweb_records(reliefweb_results)
+                source_totals["ReliefWeb"] = int(reliefweb_total)
+                combined_records.extend(reliefweb_records)
+                if callable(status_callback):
+                    status_callback(f"Finished searching ReliefWeb. Fetched {len(reliefweb_records)} ReliefWeb records.")
+            except Exception as exc:
+                if callable(status_callback):
+                    status_callback(f"ReliefWeb search failed: {exc}")
+                status = extract_reliefweb_status_code(exc)
+                if status:
+                    display.warning(f"ReliefWeb search failed with HTTP {status}.")
+                else:
+                    display.warning(f"ReliefWeb search failed: {exc}")
+
+        if "un digital library" in selected_non_openalex_sources:
+            try:
+                if callable(status_callback):
+                    status_callback("Searching UN Digital Library...")
+                un_results, un_total = fetch_un_digital_library_results_with_count(
+                    search=keyword.strip(),
+                    from_year=start_year,
+                    to_year=end_year,
+                    limit=requested_n,
+                    page_size=min(200, requested_n),
+                    timeout=30,
+                )
+                un_records = _normalize_un_digital_library_records(un_results)
+                source_totals["UN Digital Library"] = int(un_total)
+                combined_records.extend(un_records)
+                if callable(status_callback):
+                    status_callback(f"Finished searching UN Digital Library. Fetched {len(un_records)} UN Digital Library records.")
+            except Exception as exc:
+                if callable(status_callback):
+                    status_callback(f"UN Digital Library search failed: {exc}")
+                status = extract_un_digital_library_status_code(exc)
+                if status:
+                    display.warning(f"UN Digital Library search failed with HTTP {status}.")
+                else:
+                    display.warning(f"UN Digital Library search failed: {exc}")
+
+    if not combined_records:
+        display.warning("No results were returned from the selected non-OpenAlex source(s).")
+        return None
+
+    api_returned_count = len(combined_records)
+    filtered_records = [
+        record
+        for record in combined_records
+        if (
+            str(record.get("Source") or "").strip() == "ReliefWeb"
+            or _normalized_record_matches_local_filters(
+                record,
+                keyword_expr=keyword.strip(),
+                year_range=year_range,
+            )
+        )
+    ]
+
+    if not filtered_records:
+        display.warning("Results were found from non-OpenAlex sources, but none remained after local post-filtering.")
+        return None
+
+    filtered_records = sorted(
+        filtered_records,
+        key=_normalized_record_date_sort_key,
+        reverse=True,
+    )
+
+    df = pd.DataFrame(filtered_records)
+    csv = df.to_csv(index=False).encode("utf-8")
+    json_full = json.dumps(
+        df.to_dict(orient="records"),
+        indent=2,
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+    summary_parts: list[str] = []
+    if "ReliefWeb" in source_totals:
+        summary_parts.append(f"ReliefWeb reports {source_totals['ReliefWeb']} matches")
+    if "UN Digital Library" in source_totals:
+        summary_parts.append(f"UN Digital Library returned {source_totals['UN Digital Library']} records")
+    selected_source_labels = list(source_totals.keys())
+    if len(selected_source_labels) == 1:
+        fetched_summary = f"API fetched {api_returned_count} {selected_source_labels[0]} records"
+        filtered_summary = f"local post-filter retained {len(df)} {selected_source_labels[0]} records"
+    else:
+        fetched_summary = f"API fetched {api_returned_count} records from selected non-OpenAlex sources"
+        filtered_summary = f"local post-filter retained {len(df)} records"
+    summary_text = (
+        ". ".join(summary_parts)
+        + f". {fetched_summary}; {filtered_summary}."
+    )
+
+    return {
+        "csv": csv,
+        "json": json_full,
+        "total": len(df),
+        "shown": len(df),
+        "summary": summary_text,
+        "summary_lines": summary_parts,
+        "api_returned_count": api_returned_count,
+        "source_totals": source_totals,
+    }
 
 
 def get_work_topics(work: dict[str, Any]) -> str:
@@ -365,6 +943,8 @@ def perform_search(
     display_limit: int = 5,
     sort_by: str = "Relevance",
     use_semantic_search: bool = False,
+    status_callback=None,
+    emit_ui: bool = True,
 ) -> dict[str, Any] | None:
     """Perform a search against OpenAlex and render results.
 
@@ -397,15 +977,16 @@ def perform_search(
             st.warning("Please enter at least one keyword.")
             return
 
-        with st.spinner("Searching..."):
+        if callable(status_callback):
+            status_callback("Searching OpenAlex...")
+
+        spinner_context = st.spinner("Searching...") if emit_ui else nullcontext()
+        with spinner_context:
             # OpenAlex semantic search uses search.semantic as a query parameter, not a filter.
             # Regular search uses title_and_abstract.search as a filter.
-            # Semantic search has strict filter limitations (doesn't support date filters or country_code).
-            # Use publication_year range format for semantic search.
             base_params: dict[str, Any] = {}
-            
+
             if use_semantic_search:
-                # Semantic search with restricted filter set
                 base_params["search.semantic"] = keyword_expr
                 filter_parts = [
                     f"publication_year:{start_year}-{end_year}",
@@ -416,7 +997,6 @@ def perform_search(
                     types_to_query = work_types[:MAX_WORK_TYPES]
                     filter_parts.append(f"type:{'|'.join(types_to_query)}")
             else:
-                # Regular search with full filter support
                 filter_parts = [
                     f"title_and_abstract.search:{keyword_expr}",
                     f"from_publication_date:{start_year}-01-01",
@@ -431,12 +1011,13 @@ def perform_search(
                 if work_types:
                     types_to_query = work_types[:MAX_WORK_TYPES]
                     filter_parts.append(f"type:{'|'.join(types_to_query)}")
-            
+
             if filter_parts:
                 base_params["filter"] = ",".join(filter_parts)
 
             requested_n = max(int(num_results), 1)
             openalex_total = 0
+            post_filter_retained_count = 0
 
             # Map UI sort option to OpenAlex sort kwargs
             _sort_map = {
@@ -456,12 +1037,15 @@ def perform_search(
 
             query_params = _apply_sort(base_params)
 
+            page_size = min(OPENALEX_PAGE_SIZE, 100)
+            fetch_limit = None if not use_semantic_search else requested_n
+
             try:
                 all_results, openalex_total = fetch_results_with_count(
                     query_params,
-                    limit=requested_n,
+                    limit=fetch_limit,
                     use_semantic_search=use_semantic_search,
-                    page_size=min(OPENALEX_PAGE_SIZE, 100),
+                    page_size=page_size,
                     timeout=30,
                 )
             except Exception as exc:
@@ -499,11 +1083,13 @@ def perform_search(
                     try:
                         all_results, openalex_total = fetch_results_with_count(
                             fallback_params,
-                            limit=requested_n,
+                            limit=fetch_limit,
                             use_semantic_search=False,
-                            page_size=min(OPENALEX_PAGE_SIZE, 100),
+                            page_size=page_size,
                             timeout=30,
                         )
+                        query_params = fallback_params
+                        use_semantic_search = False
                         had_connection_issue = False
                         connection_error_detail = ""
                         connection_error_status = None
@@ -511,34 +1097,70 @@ def perform_search(
                         connection_error_detail = str(fallback_exc)
                         connection_error_status = extract_status_code(fallback_exc)
 
-            # Deduplicate overall and trim to requested total
-            seen = set()
-            unique_results = []
-            for r in all_results:
-                rid = r.get("id") if isinstance(r, dict) else None
-                if not rid:
-                    rid = (r.get("ids") or {}).get("openalex") if isinstance(r, dict) else None
-                if not rid or rid in seen:
-                    continue
-                seen.add(rid)
-                unique_results.append(r)
-                if len(unique_results) >= int(num_results):
-                    break
+            def _dedupe_results(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+                seen_ids = set()
+                unique_candidates: list[dict[str, Any]] = []
+                for candidate in candidates:
+                    rid = candidate.get("id") if isinstance(candidate, dict) else None
+                    if not rid:
+                        rid = (candidate.get("ids") or {}).get("openalex") if isinstance(candidate, dict) else None
+                    if not rid or rid in seen_ids:
+                        continue
+                    seen_ids.add(rid)
+                    unique_candidates.append(candidate)
+                return unique_candidates
 
-            all_results = unique_results
+            unique_results = _dedupe_results(all_results)
+            api_returned_count = len(unique_results)
+            if callable(status_callback):
+                status_callback(f"Finished searching OpenAlex. Fetched {api_returned_count} OpenAlex records.")
 
-            results = all_results
+            filtered_results = [
+                work
+                for work in unique_results
+                if _openalex_matches_local_filters(
+                    work,
+                    keyword_expr=keyword_expr,
+                    year_range=year_range,
+                    work_types=work_types,
+                    language=language,
+                    is_global_south=is_global_south,
+                    institution_country_code=institution_country_code,
+                    use_semantic_search=use_semantic_search,
+                )
+            ]
+            post_filter_retained_count = len(filtered_results)
+            results = filtered_results[:int(num_results)]
 
     except Exception as e:
-        st.error(f"Unexpected error during search: {e}")
+        if callable(status_callback):
+            status_callback(f"OpenAlex search failed: {e}")
+        if emit_ui:
+            st.error(f"Unexpected error during search: {e}")
         return
 
     if not results:
         connection_hint = (
-            "\n\n3. Connection problem: please refresh the app and try again."
+            "\n\n4. Connection problem: please refresh the app and try again."
             if had_connection_issue
-            else "\n\n3. There could be occasional connection problems. In such cases, please refresh the app and try again. If the problem persists, it may be due to high traffic or temporary issues with the OpenAlex API. Please contact us via the feedback form from the left sidebar."
+            else "\n\n4. There could be occasional connection problems. In such cases, please refresh the app and try again. If the problem persists, please contact us via the feedback form from the left sidebar."
         )
+        traffic_hint = (
+            "\n\n5. OpenAlex may temporarily pause or fail requests because of API traffic, usage limits, or server-side issues. If this happens, please wait a moment and try again."
+        )
+        if callable(status_callback) and had_connection_issue:
+            if connection_error_status == 429:
+                status_callback(
+                    "OpenAlex did not return usable results. The API reported HTTP 429, which usually means a traffic or usage-limit pause."
+                )
+            elif connection_error_status in {500, 502, 503, 504}:
+                status_callback(
+                    f"OpenAlex did not return usable results. The API reported HTTP {connection_error_status}, which is likely a temporary server-side problem."
+                )
+            else:
+                status_callback(
+                    "OpenAlex did not return usable results. This may be due to a temporary connection or API traffic problem."
+                )
         if had_connection_issue and connection_error_status in {500, 502, 503}:
             connection_hint += (
                 f"\n\nOpenAlex server returned HTTP {connection_error_status}. "
@@ -555,6 +1177,7 @@ No results were returned. This can happen when:
 3. Check the spelling of your keywords and use of boolean operators. The search supports AND/OR logic, parentheses, and double quoted phrases. For example: "climate change" AND (adaptation OR mitigation) AND "indigenous knowledge"`.
 """
             + connection_hint
+            + traffic_hint
         )
         return None
 
@@ -675,11 +1298,19 @@ No results were returned. This can happen when:
         pass
 
     openalex_total_text = str(openalex_total) if openalex_total else "an unknown number of"
+    if post_filter_retained_count > len(df):
+        filter_summary = (
+            f"local post-filter retained {post_filter_retained_count} results before applying the max-number limit; "
+            f"download files include the first {len(df)} filtered results"
+        )
+    else:
+        filter_summary = f"local post-filter retained {post_filter_retained_count} results"
+
     summary_text = (
         f"OpenAlex reports {openalex_total_text} matches. "
-        f"Returned {len(df)} unique results. Json & CSV are available for download."
+        f"API returned {api_returned_count} records for this request; {filter_summary}. "
+        "Json & CSV are available for download."
     )
-    display.success(summary_text)
 
     csv = df.to_csv(index=False).encode("utf-8")
     json_full = json.dumps(
@@ -694,5 +1325,7 @@ No results were returned. This can happen when:
         "openalex_total": openalex_total,
         "shown": len(df_display),
         "summary": summary_text,
+        "summary_lines": [f"OpenAlex reports {openalex_total_text} matches."],
+        "api_returned_count": api_returned_count,
     }
 

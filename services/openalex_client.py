@@ -1,24 +1,47 @@
 """OpenAlex HTTP client helpers with retry and pagination behavior."""
 
+import os
 import time
 from typing import Any
 
 import requests
+from dotenv import load_dotenv
 
 
 OPENALEX_WORKS_URL = "https://api.openalex.org/works"
+
+
+load_dotenv()
+
+
+def _with_openalex_auth(params: dict[str, Any]) -> dict[str, Any]:
+    """Attach the configured OpenAlex API key when one is available."""
+    api_key = (
+        os.getenv("OPENALEX_API_KEY")
+        or os.getenv("OPENALEX_APIKEY")
+        or os.getenv("openalex_api_key")
+        or os.getenv("openalex_apiKey")
+        or os.getenv("openalex_api")
+    )
+    if not api_key:
+        return dict(params)
+
+    authenticated_params = dict(params)
+    authenticated_params.setdefault("api_key", api_key)
+    return authenticated_params
 
 
 def request_openalex(params: dict[str, Any], *, timeout: int = 30) -> requests.Response:
     """Send an OpenAlex request with retries for transient failures."""
     max_attempts = 3
     last_exc: Exception | None = None
+    request_params = _with_openalex_auth(params)
 
     for attempt in range(1, max_attempts + 1):
         try:
             response = requests.get(
                 OPENALEX_WORKS_URL,
-                params=params,
+                params=request_params,
                 timeout=timeout,
             )
             if response.status_code in (429, 500, 502, 503, 504) and attempt < max_attempts:
@@ -50,7 +73,7 @@ def extract_status_code(exc: Exception) -> int | None:
 def fetch_paginated(
     params: dict[str, Any],
     *,
-    limit: int,
+    limit: int | None,
     page_size: int,
     timeout: int = 30,
 ) -> list[dict[str, Any]]:
@@ -58,7 +81,7 @@ def fetch_paginated(
     page = 1
     collected: list[dict[str, Any]] = []
 
-    while len(collected) < limit:
+    while limit is None or len(collected) < limit:
         response = request_openalex(
             {**params, "per_page": page_size, "page": page},
             timeout=timeout,
@@ -71,13 +94,13 @@ def fetch_paginated(
             break
         page += 1
 
-    return collected[:limit]
+    return collected if limit is None else collected[:limit]
 
 
 def fetch_results_with_count(
     params: dict[str, Any],
     *,
-    limit: int,
+    limit: int | None,
     use_semantic_search: bool,
     page_size: int,
     timeout: int = 30,

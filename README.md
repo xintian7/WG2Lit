@@ -48,6 +48,8 @@ Depending on enabled features, configure the following in your environment:
 
 ## Run Locally
 
+Run commands from the repository root so Streamlit loads the shared `.streamlit/config.toml` settings.
+
 1. Install dependencies:
 
 ```bash
