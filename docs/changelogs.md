@@ -8,6 +8,24 @@ This file uses an entry format of:
 
 ---
 
+Date: 2026-07-07
+Version: v0.3b
+
+Main activities:
+- Removed the OpenAlex semantic-search checkbox from the search page and standardized the UI on the regular keyword-search path. (files: `pages/literature_search_page.py`, `pages/user_guide_page.py`)
+- Expanded the in-app user guide to reflect the current multi-source workflow, cached-result behavior, review flow, and export behavior. (file: `pages/user_guide_page.py`)
+- Improved keyword-search helper text with clearer guidance to run several focused searches instead of one overly broad query, including concrete examples and rationale. (file: `pages/literature_search_page.py`)
+- Extended Literature Review filtering with publication type, keyword, and publication-year filters, and aligned the type filter with the topic-filter popover pattern. (file: `pages/literature_review_page.py`)
+- Split Literature Export into two user-facing sections: full cached search exports and exports of the records remaining after Literature Review filtering and skipping. (files: `app_lit_wg2.py`, `pages/literature_export_page.py`)
+- Added review-aware export payload construction so export outputs can mirror the active Literature Review state across source, topic, type, keyword, year, and skipped-record filters. (file: `app_lit_wg2.py`)
+- Added multiple standalone service clients for future source expansion, including World Bank-adjacent and multilateral institution adapters that are currently kept at the service layer only. (files under `services/`)
+
+Notes & next steps:
+- Validate the newly added standalone institution clients with targeted runtime probes before integrating any of them into the main search UI.
+- If the export split is final, keep future documentation and screenshots aligned with the two export sections.
+
+---
+
 Date: 2026-05-08
 Version: v0.1a
 
@@ -163,4 +181,4 @@ Notes & next steps:
 
 ---
 
-Last updated: 2026-07-06
+Last updated: 2026-07-07

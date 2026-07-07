@@ -82,6 +82,9 @@ def _display_record_source(rec: dict[str, Any]) -> str:
     if provider.lower() == "un digital library":
         return "UN Digital Library"
 
+    if provider.lower() == "world bank":
+        return "World Bank"
+
     # OpenAlex records usually omit `Source`; infer from schema fallback.
     if journal_or_source:
         return f"{journal_or_source} (via OpenAlex)"
@@ -99,6 +102,8 @@ def _display_url_label(rec: dict[str, Any]) -> str:
         return "ReliefWeb URL"
     if provider == "un digital library":
         return "UN DL URL"
+    if provider == "world bank":
+        return "World Bank URL"
     return "OpenAlex URL"
 
 

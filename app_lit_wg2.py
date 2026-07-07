@@ -114,15 +114,23 @@ def _payload_after_skips(payload: dict | None) -> dict | None:
         if record_identifier(rec) not in skipped_ids
     ]
 
+    return _build_export_payload(payload, filtered_records)
+
+
+def _build_export_payload(payload: dict | None, records: list[dict[str, Any]]) -> dict | None:
+    """Build export-ready payload bytes from a list of original records."""
+    if not payload:
+        return payload
+
     export_header_map = {
-        "OpenAlex": "OpenAlex/ReliefWeb/UN_DL",
-        "OpenAlex URL": "OpenAlex/ReliefWeb/UN_DL URL",
+        "OpenAlex": "OpenAlex/ReliefWeb/UN_DL/World_Bank",
+        "OpenAlex URL": "OpenAlex/ReliefWeb/UN_DL/World_Bank URL",
         "Journal": "Journal/Source",
         "Publication Date": "Publication Date/Datetime",
     }
 
     export_records = []
-    for rec in filtered_records:
+    for rec in records:
         if not isinstance(rec, dict):
             continue
         export_records.append({
@@ -130,7 +138,7 @@ def _payload_after_skips(payload: dict | None) -> dict | None:
             for key, value in rec.items()
         })
 
-    if not export_records and filtered_records:
+    if not export_records and records:
         return payload
 
     filtered_payload = dict(payload)
@@ -140,8 +148,167 @@ def _payload_after_skips(payload: dict | None) -> dict | None:
         ensure_ascii=False,
     ).encode("utf-8")
     filtered_payload["csv"] = pd.DataFrame(export_records).to_csv(index=False).encode("utf-8")
-    filtered_payload["total"] = len(filtered_records)
+    filtered_payload["total"] = len(records)
     return filtered_payload
+
+
+def _payload_for_all_exports(payload: dict | None) -> dict | None:
+    """Return the full cached payload in export-ready format without review filtering."""
+    if not payload:
+        return payload
+
+    try:
+        records = json.loads(payload.get("json") or "[]")
+    except Exception:
+        return payload
+
+    if not isinstance(records, list):
+        return payload
+
+    filtered_records = [rec for rec in records if isinstance(rec, dict)]
+    return _build_export_payload(payload, filtered_records)
+
+
+def _record_publication_year(record: dict[str, Any]) -> int | None:
+    """Extract a 4-digit publication year when present."""
+    publication_date = str(record.get("Publication Date") or "").strip()
+    publication_year = str(record.get("Publication Year") or "").strip()
+    combined = f"{publication_date} {publication_year}"
+    digits = "".join(ch if ch.isdigit() else " " for ch in combined).split()
+    for token in digits:
+        if len(token) >= 4:
+            year_candidate = token[:4]
+            if year_candidate.isdigit():
+                year_value = int(year_candidate)
+                if 1900 <= year_value <= 2100:
+                    return year_value
+    return None
+
+
+def _record_matches_review_keyword_filter(record: dict[str, Any], keyword_query: str) -> bool:
+    """Return True when a record contains all entered review keyword fragments."""
+    normalized_query = str(keyword_query or "").strip().lower()
+    if not normalized_query:
+        return True
+
+    fragments = [fragment.strip().lower() for fragment in normalized_query.split(";") if fragment.strip()]
+    if not fragments:
+        fragments = [normalized_query]
+
+    search_fields = [
+        record.get("Title"),
+        record.get("Abstract"),
+        record.get("Keywords"),
+        record.get("Topics"),
+        record.get("Authors"),
+        record.get("Journal"),
+        record.get("Source"),
+        record.get("Type"),
+    ]
+    searchable_text = " ".join(str(value or "") for value in search_fields).lower()
+    return all(fragment in searchable_text for fragment in fragments)
+
+
+def _payload_after_review_filters(payload: dict | None) -> dict | None:
+    """Return a payload filtered by the current Literature Review filters and skips."""
+    if not payload:
+        return payload
+
+    try:
+        records = json.loads(payload.get("json") or "[]")
+    except Exception:
+        return payload
+
+    if not isinstance(records, list):
+        return payload
+
+    original_records = [rec for rec in records if isinstance(rec, dict)]
+    if not original_records:
+        return _build_export_payload(payload, [])
+
+    skipped_ids = set(st.session_state.get("html_skipped_publications", []))
+    selected_sources = st.session_state.get("html_source_filter") if "html_source_filter" in st.session_state else None
+    selected_topics = st.session_state.get("html_topic_filter") if "html_topic_filter" in st.session_state else None
+    selected_types = st.session_state.get("html_type_filter") if "html_type_filter" in st.session_state else None
+    selected_year_range = st.session_state.get("html_year_filter") if "html_year_filter" in st.session_state else None
+    keyword_query = str(st.session_state.get("html_keyword_filter", "") or "").strip()
+
+    source_filtered_records = original_records
+    if selected_sources is not None:
+        selected_sources_set = set(selected_sources)
+        source_filtered_records = [
+            rec for rec in original_records
+            if (str(rec.get("Source") or "OpenAlex").strip() or "OpenAlex") in selected_sources_set
+        ]
+
+    no_generated_topics_label = "No Generated Topics"
+    topic_set: set[str] = set()
+    has_no_generated_topics = False
+    type_set: set[str] = set()
+    available_years: list[int] = []
+    for rec in source_filtered_records:
+        topics_str = str(rec.get("Topics") or "").strip()
+        if topics_str:
+            for topic in [item.strip() for item in topics_str.split(";") if item.strip()]:
+                topic_set.add(topic)
+        else:
+            has_no_generated_topics = True
+
+        work_type = str(rec.get("Type") or "").strip()
+        if work_type:
+            type_set.add(work_type)
+
+        year_value = _record_publication_year(rec)
+        if year_value is not None:
+            available_years.append(year_value)
+
+    topic_options = sorted(topic_set, key=str.lower)
+    if has_no_generated_topics:
+        topic_options.append(no_generated_topics_label)
+
+    effective_topics = topic_options if selected_topics is None else list(selected_topics)
+    effective_types = sorted(type_set, key=str.lower) if selected_types is None else list(selected_types)
+    if available_years:
+        year_bounds = (min(available_years), max(available_years))
+    else:
+        year_bounds = (1900, 2027)
+    effective_year_range = year_bounds
+    if isinstance(selected_year_range, tuple) and len(selected_year_range) == 2:
+        effective_year_range = selected_year_range
+
+    filtered_records: list[dict[str, Any]] = []
+    include_no_generated_topics = no_generated_topics_label in effective_topics
+    selected_topic_lc = {
+        topic.lower() for topic in effective_topics if topic != no_generated_topics_label
+    }
+
+    for rec in source_filtered_records:
+        if record_identifier(rec) in skipped_ids:
+            continue
+
+        topics_str = str(rec.get("Topics") or "").strip()
+        rec_topics = {item.strip().lower() for item in topics_str.split(";") if item.strip()}
+        if effective_topics is not None:
+            if not (rec_topics.intersection(selected_topic_lc) or (include_no_generated_topics and not rec_topics)):
+                continue
+
+        work_type = str(rec.get("Type") or "").strip()
+        if effective_types and work_type not in effective_types:
+            continue
+
+        if not _record_matches_review_keyword_filter(rec, keyword_query):
+            continue
+
+        record_year = _record_publication_year(rec)
+        if available_years:
+            if record_year is None:
+                continue
+            if record_year < effective_year_range[0] or record_year > effective_year_range[1]:
+                continue
+
+        filtered_records.append(rec)
+
+    return _build_export_payload(payload, filtered_records)
 
 
 def _payload_records(payload: dict | None) -> list[dict[str, Any]]:
@@ -420,7 +587,7 @@ def _run_keyword_search(
     openalex_payload: dict | None = None
     extra_payload: dict | None = None
     non_openalex_sources = [
-        source for source in selected_sources if str(source).strip().lower() in {"reliefweb", "un digital library"}
+        source for source in selected_sources if str(source).strip().lower() in {"reliefweb", "un digital library", "world bank"}
     ]
 
     if "openalex" in normalized_sources:
@@ -444,6 +611,8 @@ def _run_keyword_search(
                 pending_labels.append("ReliefWeb")
             if any(str(source).strip().lower() == "un digital library" for source in non_openalex_sources):
                 pending_labels.append("UN Digital Library")
+            if any(str(source).strip().lower() == "world bank" for source in non_openalex_sources):
+                pending_labels.append("World Bank")
             if pending_labels:
                 update_search_status(
                     f"OpenAlex finished. Continuing with {' and '.join(pending_labels)} before combined results are returned."
@@ -476,6 +645,8 @@ def _run_keyword_search(
             summary_lines.append(f"- ReliefWeb reports {extra_source_totals['ReliefWeb']} matches.")
         if "UN Digital Library" in extra_source_totals:
             summary_lines.append(f"- UN Digital Library reports {extra_source_totals['UN Digital Library']} matches.")
+        if "World Bank" in extra_source_totals:
+            summary_lines.append(f"- World Bank reports {extra_source_totals['World Bank']} matches.")
 
         if summary_lines:
             retained_total = int((result_payload or {}).get("total") or 0)
@@ -867,7 +1038,7 @@ def _on_main_section_change() -> None:
 
 with st.sidebar:
     st.markdown(
-        "<span style='color: #00a9cf; font-weight: bold;'>Climate Literature Navigator (ver 0.2)</span>",
+        "<span style='color: #00a9cf; font-weight: bold;'>Climate Literature Navigator (ver 0.4)</span>",
         unsafe_allow_html=True,
     )
     st.markdown("Read information")
@@ -956,7 +1127,9 @@ if active_main_section == "literature network":
 
 if active_main_section == "literature export":
     render_literature_export_page(
+        _payload_for_all_exports,
         _payload_after_skips,
+        _payload_after_review_filters,
         _payload_to_bibtex,
         build_neo4j_cypher,
     )

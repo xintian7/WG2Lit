@@ -10,6 +10,7 @@ import streamlit as st
 from core.constants import OPENALEX_PAGE_SIZE, MAX_WORK_TYPES
 from services.openalex_client import (
     extract_status_code,
+    fetch_page,
     fetch_results_with_count,
 )
 from services.reliefweb_client import (
@@ -20,6 +21,10 @@ from services.un_digital_library_client import (
     MARC_NS,
     extract_status_code as extract_un_digital_library_status_code,
     fetch_results_with_count as fetch_un_digital_library_results_with_count,
+)
+from services.world_bank_client import (
+    extract_status_code as extract_world_bank_status_code,
+    fetch_results_with_count as fetch_world_bank_results_with_count,
 )
 
 
@@ -248,6 +253,78 @@ def _normalize_un_digital_library_records(records: list[ET.Element]) -> list[dic
     return normalized
 
 
+def _world_bank_authors(raw_authors: Any) -> str:
+    """Extract author names from World Bank author mapping objects."""
+    if not isinstance(raw_authors, dict):
+        return ""
+
+    authors: list[str] = []
+    for item in raw_authors.values():
+        if not isinstance(item, dict):
+            continue
+        author_name = str(item.get("author") or "").strip()
+        if author_name:
+            authors.append(author_name)
+    return _join_non_empty(authors, separator=", ")
+
+
+def _world_bank_abstract(raw_abstracts: Any) -> str:
+    """Extract a readable abstract string from World Bank abstract payloads."""
+    if isinstance(raw_abstracts, dict):
+        text = str(raw_abstracts.get("cdata!") or "").strip()
+    else:
+        text = str(raw_abstracts or "").strip()
+    return re.sub(r"\s+", " ", text)
+
+
+def _normalize_world_bank_records(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize World Bank documents to the app's tabular export schema."""
+    normalized: list[dict[str, Any]] = []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+
+        title = _first_non_empty([
+            item.get("display_title"),
+            item.get("title"),
+        ])
+        publication_date = str(item.get("docdt") or item.get("disclosure_date") or "").strip()
+        if "T" in publication_date:
+            publication_date = publication_date.split("T", maxsplit=1)[0]
+        publication_year = publication_date[:4] if publication_date else ""
+        url = _first_non_empty([
+            item.get("url"),
+            item.get("pdfurl"),
+            item.get("txturl"),
+        ])
+        theme_names = [part.strip() for part in str(item.get("theme") or "").split(",") if part.strip()]
+
+        normalized.append({
+            "Source": "World Bank",
+            "OpenAlex": f'<a href="{url}" target="_blank">View</a>' if url else "",
+            "OpenAlex URL": url,
+            "Title": title,
+            "Publication Date": publication_date,
+            "Publication Year": publication_year,
+            "Journal": _first_non_empty([item.get("majdocty"), item.get("count")]),
+            "Type": str(item.get("docty") or "").strip(),
+            "Authors": _world_bank_authors(item.get("authors")),
+            "Open Access": "",
+            "OA Status": "",
+            "Citations": "",
+            "DOI": "",
+            "Relevance Score": "",
+            "Keywords": _join_non_empty(theme_names),
+            "Topics": _join_non_empty(theme_names),
+            "Abstract": _world_bank_abstract(item.get("abstracts")),
+            "Publisher": "World Bank",
+            "URL": url,
+            "Language": str(item.get("lang") or "").strip(),
+        })
+
+    return normalized
+
+
 def _build_normalized_record_text_blob(record: dict[str, Any]) -> str:
     """Build a lowercase text blob from normalized record fields."""
     fields = [
@@ -447,7 +524,7 @@ def perform_non_openalex_search(
     status_callback=None,
     emit_ui: bool = True,
 ) -> dict[str, Any] | None:
-    """Search ReliefWeb and/or UN Digital Library and return a combined payload."""
+    """Search non-OpenAlex sources and return a combined payload."""
     display = container if container is not None else st
 
     if not keyword or not keyword.strip():
@@ -459,7 +536,7 @@ def perform_non_openalex_search(
 
     normalized_sources = {str(source).strip().lower() for source in (sources or []) if str(source).strip()}
     selected_non_openalex_sources = [
-        source for source in normalized_sources if source in {"reliefweb", "un digital library"}
+        source for source in normalized_sources if source in {"reliefweb", "un digital library", "world bank"}
     ]
     if not selected_non_openalex_sources:
         return None
@@ -525,6 +602,30 @@ def perform_non_openalex_search(
                 else:
                     display.warning(f"UN Digital Library search failed: {exc}")
 
+        if "world bank" in selected_non_openalex_sources:
+            try:
+                if callable(status_callback):
+                    status_callback("Searching World Bank...")
+                world_bank_results, world_bank_total = fetch_world_bank_results_with_count(
+                    search=keyword.strip(),
+                    limit=requested_n,
+                    page_size=min(200, requested_n),
+                    timeout=30,
+                )
+                world_bank_records = _normalize_world_bank_records(world_bank_results)
+                source_totals["World Bank"] = int(world_bank_total)
+                combined_records.extend(world_bank_records)
+                if callable(status_callback):
+                    status_callback(f"Finished searching World Bank. Fetched {len(world_bank_records)} World Bank records.")
+            except Exception as exc:
+                if callable(status_callback):
+                    status_callback(f"World Bank search failed: {exc}")
+                status = extract_world_bank_status_code(exc)
+                if status:
+                    display.warning(f"World Bank search failed with HTTP {status}.")
+                else:
+                    display.warning(f"World Bank search failed: {exc}")
+
     if not combined_records:
         display.warning("No results were returned from the selected non-OpenAlex source(s).")
         return None
@@ -566,6 +667,8 @@ def perform_non_openalex_search(
         summary_parts.append(f"ReliefWeb reports {source_totals['ReliefWeb']} matches")
     if "UN Digital Library" in source_totals:
         summary_parts.append(f"UN Digital Library returned {source_totals['UN Digital Library']} records")
+    if "World Bank" in source_totals:
+        summary_parts.append(f"World Bank returned {source_totals['World Bank']} records")
     selected_source_labels = list(source_totals.keys())
     if len(selected_source_labels) == 1:
         fetched_summary = f"API fetched {api_returned_count} {selected_source_labels[0]} records"
@@ -1018,6 +1121,7 @@ def perform_search(
             requested_n = max(int(num_results), 1)
             openalex_total = 0
             post_filter_retained_count = 0
+            post_filter_exhaustive = use_semantic_search
 
             # Map UI sort option to OpenAlex sort kwargs
             _sort_map = {
@@ -1038,16 +1142,77 @@ def perform_search(
             query_params = _apply_sort(base_params)
 
             page_size = min(OPENALEX_PAGE_SIZE, 100)
-            fetch_limit = None if not use_semantic_search else requested_n
+
+            def _dedupe_results(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+                seen_ids = set()
+                unique_candidates: list[dict[str, Any]] = []
+                for candidate in candidates:
+                    rid = candidate.get("id") if isinstance(candidate, dict) else None
+                    if not rid:
+                        rid = (candidate.get("ids") or {}).get("openalex") if isinstance(candidate, dict) else None
+                    if not rid or rid in seen_ids:
+                        continue
+                    seen_ids.add(rid)
+                    unique_candidates.append(candidate)
+                return unique_candidates
+
+            def _fetch_regular_openalex_until_limit(params: dict[str, Any]) -> tuple[list[dict[str, Any]], int, bool]:
+                page = 1
+                scanned_results: list[dict[str, Any]] = []
+                filtered_matches: list[dict[str, Any]] = []
+                seen_ids: set[str] = set()
+                total_count = 0
+
+                while len(filtered_matches) < requested_n:
+                    batch, batch_total = fetch_page(
+                        params,
+                        page=page,
+                        page_size=page_size,
+                        timeout=30,
+                    )
+                    if page == 1:
+                        total_count = batch_total
+                    if not batch:
+                        return scanned_results, total_count, True
+
+                    for candidate in batch:
+                        rid = candidate.get("id") if isinstance(candidate, dict) else None
+                        if not rid:
+                            rid = (candidate.get("ids") or {}).get("openalex") if isinstance(candidate, dict) else None
+                        if not rid or rid in seen_ids:
+                            continue
+                        seen_ids.add(rid)
+                        scanned_results.append(candidate)
+                        if _openalex_matches_local_filters(
+                            candidate,
+                            keyword_expr=keyword_expr,
+                            year_range=year_range,
+                            work_types=work_types,
+                            language=language,
+                            is_global_south=is_global_south,
+                            institution_country_code=institution_country_code,
+                            use_semantic_search=False,
+                        ):
+                            filtered_matches.append(candidate)
+                            if len(filtered_matches) >= requested_n:
+                                return scanned_results, total_count, False
+
+                    if len(batch) < page_size:
+                        return scanned_results, total_count, True
+
+                    page += 1
 
             try:
-                all_results, openalex_total = fetch_results_with_count(
-                    query_params,
-                    limit=fetch_limit,
-                    use_semantic_search=use_semantic_search,
-                    page_size=page_size,
-                    timeout=30,
-                )
+                if use_semantic_search:
+                    all_results, openalex_total = fetch_results_with_count(
+                        query_params,
+                        limit=requested_n,
+                        use_semantic_search=True,
+                        page_size=page_size,
+                        timeout=30,
+                    )
+                else:
+                    all_results, openalex_total, post_filter_exhaustive = _fetch_regular_openalex_until_limit(query_params)
             except Exception as exc:
                 had_connection_issue = True
                 connection_error_detail = str(exc)
@@ -1081,13 +1246,7 @@ def perform_search(
 
                     fallback_params = _apply_sort({"filter": ",".join(fallback_filter_parts)})
                     try:
-                        all_results, openalex_total = fetch_results_with_count(
-                            fallback_params,
-                            limit=fetch_limit,
-                            use_semantic_search=False,
-                            page_size=page_size,
-                            timeout=30,
-                        )
+                        all_results, openalex_total, post_filter_exhaustive = _fetch_regular_openalex_until_limit(fallback_params)
                         query_params = fallback_params
                         use_semantic_search = False
                         had_connection_issue = False
@@ -1096,19 +1255,6 @@ def perform_search(
                     except Exception as fallback_exc:
                         connection_error_detail = str(fallback_exc)
                         connection_error_status = extract_status_code(fallback_exc)
-
-            def _dedupe_results(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
-                seen_ids = set()
-                unique_candidates: list[dict[str, Any]] = []
-                for candidate in candidates:
-                    rid = candidate.get("id") if isinstance(candidate, dict) else None
-                    if not rid:
-                        rid = (candidate.get("ids") or {}).get("openalex") if isinstance(candidate, dict) else None
-                    if not rid or rid in seen_ids:
-                        continue
-                    seen_ids.add(rid)
-                    unique_candidates.append(candidate)
-                return unique_candidates
 
             unique_results = _dedupe_results(all_results)
             api_returned_count = len(unique_results)
@@ -1298,7 +1444,12 @@ No results were returned. This can happen when:
         pass
 
     openalex_total_text = str(openalex_total) if openalex_total else "an unknown number of"
-    if post_filter_retained_count > len(df):
+    if not post_filter_exhaustive:
+        filter_summary = (
+            f"local post-filter retained at least {post_filter_retained_count} results before applying the max-number limit; "
+            f"download files include the first {len(df)} filtered results"
+        )
+    elif post_filter_retained_count > len(df):
         filter_summary = (
             f"local post-filter retained {post_filter_retained_count} results before applying the max-number limit; "
             f"download files include the first {len(df)} filtered results"

@@ -83,7 +83,7 @@ For external literature source clients under `services/`:
 - Search results should be cached in session state.
 
 ### Literature Review
-- Review should handle filtering, topic selection, and page-based browsing.
+- Review should handle source, topic, type, keyword, and publication-year filtering plus page-based browsing.
 - Data-source filtering should be shown as direct checkboxes when only a small fixed set of sources is available.
 - Use compact pagination.
 - Keep the preview and filtering flow readable on one page.
@@ -99,6 +99,7 @@ For external literature source clients under `services/`:
 ### Literature Export
 - Keep export actions grouped together.
 - Export controls should remain clear and stable.
+- Keep a clear distinction between full cached-search exports and review-refined exports when both are offered.
 
 ## Interaction Rules
 1. Do not open a new page when an in-app tab switch is intended.
@@ -111,6 +112,7 @@ For external literature source clients under `services/`:
 - Displayed works per page: `10`
 - Default page progression: compact numbered controls with first/last anchors and ellipses for gaps
 - Optional hide-abstracts checkbox: unchecked by default
+- Review filters currently include source, topic, type, keyword text, and publication year
 
 ## Do / Don’t
 ### Do
@@ -141,4 +143,4 @@ For external literature source clients under `services/`:
 ## Maintenance Note
 Update this guide whenever the default style, navigation model, or page responsibilities change so future work stays aligned with the current standard.
 
-Last reviewed: 2026-07-06
+Last reviewed: 2026-07-07

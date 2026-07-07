@@ -29,11 +29,12 @@ def render_literature_search_page(
         st.markdown(
             "- [**OpenAlex**](https://openalex.org/) is a fully open catalog of the global research system - hundreds of millions of scholarly works, authors, institutions, and more.\n"
             "- [**ReliefWeb**](https://reliefweb.int/) is the leading humanitarian information service provided by the United Nations Office for the Coordination of Humanitarian Affairs (OCHA).\n"
-            "- [**United Nations Digital Library**](https://digitallibrary.un.org/) is a primary bibliographic database of the United Nations established in 1979. It consists of the official documents and publications produced by the UN System."
+            "- [**United Nations Digital Library**](https://digitallibrary.un.org/) is a primary bibliographic database of the United Nations established in 1979. It consists of the official documents and publications produced by the UN System.\n"
+            "- [**World Bank Documents & Reports**](https://documents.worldbank.org/) provides access to World Bank publications, reports, and official documents."
         )
         selected_sources = st.multiselect(
             "",
-            options=["OpenAlex", "ReliefWeb", "UN Digital Library"],
+            options=["OpenAlex", "ReliefWeb", "UN Digital Library", "World Bank"],
             default=["OpenAlex"],
             label_visibility="collapsed",
             key="search_sources",
@@ -60,25 +61,16 @@ def render_literature_search_page(
             "**Double quotes**: exact phrases,  \n"
             "**Notes**: Other operators are not supported at this moment. Please submit feedback using the feedback form if you need additional operators.  \n"
             "**Example**: \"climate change\" AND (water OR \"land use\") AND Bahamas.  \n"
-            "**Reference**: [OpenAlex searching guide](https://developers.openalex.org/guides/searching)"
+            "**Reference**: [OpenAlex searching guide](https://developers.openalex.org/guides/searching)  \n"
+            "**Suggestion**: Run several focused searches instead of one very broad search. This is usually faster and gives cleaner results.  \n"
+            "**Try searches like**: `\"climate change\" AND adaptation AND Kenya`, `\"climate finance\" AND Bangladesh`, or `\"loss and damage\" AND \"small island states\"` instead of only `climate change`.  Broad searches often return very large and mixed result sets. Narrower combinations usually reduce irrelevant matches, make searching faster, and make it easier to compare results across places, sectors, or themes."
         )
     kw_col1, kw_col2 = st.columns([1, 4])
     with kw_col1:
         st.write("")
     with kw_col2:
         keyword = st.text_input("", value="climate change", label_visibility="collapsed", key="kw")
-        if openalex_selected:
-            use_semantic_search = st.checkbox(
-                "Semantic search",
-                value=False,
-                key="semantic_search",
-                help="If checked, apply semantic search to OpenAlex only (broader, AI-powered matching). Other selected sources continue to use their regular keyword search. If unchecked, OpenAlex also uses regular Boolean search. Note: Semantic search does not support country/institution filters. Reference: https://developers.openalex.org/guides/semantic-search",
-            )
-            if not openalex_only_selected:
-                st.caption("When Semantic search is enabled, it applies to OpenAlex only. ReliefWeb and UN Digital Library continue to use regular keyword search.")
-        else:
-            use_semantic_search = False
-            st.caption("Semantic search is currently available for OpenAlex only.")
+        use_semantic_search = False
 
     # Publication year: label+help line, then slider line
     label_col, help_col = st.columns([1, 4])
@@ -212,7 +204,7 @@ def render_literature_search_page(
     elif openalex_selected:
         st.caption("Language and UN member states are hidden unless OpenAlex is the only selected source. Type is still available above and applies only to OpenAlex.")
     else:
-        st.caption("OpenAlex-only filters (Type, Language, UN member states, Semantic search) are hidden because OpenAlex is not selected.")
+        st.caption("OpenAlex-only filters (Type, Language, UN member states) are hidden because OpenAlex is not selected.")
 
     # Number of results: label line then control line
     label_col, help_col = st.columns([1, 4])

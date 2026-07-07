@@ -20,6 +20,19 @@ def _topic_filter_button_label(selected_topics: list[str], all_topics: list[str]
     return f"Filter Topic: {selected_topics[0]}, {selected_topics[1]} +{len(selected_topics) - 2}"
 
 
+def _type_filter_button_label(selected_types: list[str], all_types: list[str]) -> str:
+    """Build a compact dropdown label for the selected publication types."""
+    if not all_types:
+        return "No types available"
+    if not selected_types:
+        return "Filter Type: None"
+    if len(selected_types) == len(all_types):
+        return f"Filter Type: All ({len(all_types)})"
+    if len(selected_types) <= 2:
+        return f"Filter Type: {', '.join(selected_types)}"
+    return f"Filter Type: {selected_types[0]}, {selected_types[1]} +{len(selected_types) - 2}"
+
+
 def _record_date_sort_key(record: dict[str, Any]) -> tuple[int, str]:
     """Build a descending-friendly sort key from publication date/year text."""
     publication_date = str(record.get("Publication Date") or "").strip()
@@ -28,6 +41,46 @@ def _record_date_sort_key(record: dict[str, Any]) -> tuple[int, str]:
     digits_only = "".join(ch for ch in normalized if ch.isdigit())
     numeric_key = int(digits_only[:8]) if digits_only else 0
     return numeric_key, normalized
+
+
+def _record_publication_year(record: dict[str, Any]) -> int | None:
+    """Extract a 4-digit publication year when present."""
+    publication_date = str(record.get("Publication Date") or "").strip()
+    publication_year = str(record.get("Publication Year") or "").strip()
+    combined = f"{publication_date} {publication_year}"
+    digits = "".join(ch if ch.isdigit() else " " for ch in combined).split()
+    for token in digits:
+        if len(token) >= 4:
+            year_candidate = token[:4]
+            if year_candidate.isdigit():
+                year_value = int(year_candidate)
+                if 1900 <= year_value <= 2100:
+                    return year_value
+    return None
+
+
+def _record_matches_keyword_filter(record: dict[str, Any], keyword_query: str) -> bool:
+    """Return True when a record contains all entered keyword fragments."""
+    normalized_query = str(keyword_query or "").strip().lower()
+    if not normalized_query:
+        return True
+
+    fragments = [fragment.strip().lower() for fragment in normalized_query.split(";") if fragment.strip()]
+    if not fragments:
+        fragments = [normalized_query]
+
+    search_fields = [
+        record.get("Title"),
+        record.get("Abstract"),
+        record.get("Keywords"),
+        record.get("Topics"),
+        record.get("Authors"),
+        record.get("Journal"),
+        record.get("Source"),
+        record.get("Type"),
+    ]
+    searchable_text = " ".join(str(value or "") for value in search_fields).lower()
+    return all(fragment in searchable_text for fragment in fragments)
 
 
 def render_literature_review_page(render_html_preview: Callable[..., Any]) -> None:
@@ -44,6 +97,7 @@ def render_literature_review_page(render_html_preview: Callable[..., Any]) -> No
     html_records_all = []
     html_source_options = []
     html_topic_options = []
+    html_type_options = []
     try:
         html_records_all = json.loads(cached_payload.get("json") or "[]")
     except Exception:
@@ -215,6 +269,120 @@ def render_literature_review_page(render_html_preview: Callable[..., Any]) -> No
                         args=(topic,),
                     )
 
+    if isinstance(source_filtered_records, list) and source_filtered_records:
+        type_set = set()
+        available_years = []
+        for rec in source_filtered_records:
+            if not isinstance(rec, dict):
+                continue
+            work_type = str(rec.get("Type") or "").strip()
+            if work_type:
+                type_set.add(work_type)
+            year_value = _record_publication_year(rec)
+            if year_value is not None:
+                available_years.append(year_value)
+        html_type_options = sorted(type_set, key=str.lower)
+    else:
+        available_years = []
+
+    existing_type_selection = st.session_state.get("html_type_filter")
+    if not html_type_options:
+        st.session_state["html_type_filter"] = []
+    elif existing_type_selection is None:
+        st.session_state["html_type_filter"] = html_type_options.copy()
+    else:
+        st.session_state["html_type_filter"] = [
+            work_type for work_type in existing_type_selection if work_type in html_type_options
+        ]
+
+    label_col, help_col = st.columns([1, 4])
+    with label_col:
+        st.markdown("**Filter Type**")
+    with help_col:
+        st.caption("Select one or more publication types to narrow the results.")
+    type_col1, type_col2 = st.columns([1, 4])
+    with type_col1:
+        st.write("")
+    with type_col2:
+        def _select_all_types() -> None:
+            st.session_state["html_type_filter"] = html_type_options.copy()
+            st.session_state["html_preview_page_index"] = 0
+
+        def _clear_all_types() -> None:
+            st.session_state["html_type_filter"] = []
+            st.session_state["html_preview_page_index"] = 0
+
+        def _toggle_type_selection(work_type: str) -> None:
+            checkbox_key = f"html_type_option_{work_type}"
+            selected_set = set(st.session_state.get("html_type_filter", []))
+            if st.session_state.get(checkbox_key):
+                selected_set.add(work_type)
+            else:
+                selected_set.discard(work_type)
+            st.session_state["html_type_filter"] = [
+                option for option in html_type_options if option in selected_set
+            ]
+            st.session_state["html_preview_page_index"] = 0
+
+        selected_html_types = st.session_state.get("html_type_filter", [])
+        type_filter_label = _type_filter_button_label(selected_html_types, html_type_options)
+
+        with st.popover(type_filter_label, use_container_width=True):
+            action_col1, action_col2 = st.columns(2)
+            with action_col1:
+                if st.button("Select all", key="html_type_select_all_button", use_container_width=True):
+                    _select_all_types()
+                    st.rerun()
+            with action_col2:
+                if st.button("Clear", key="html_type_clear_all_button", use_container_width=True):
+                    _clear_all_types()
+                    st.rerun()
+
+            type_search = st.text_input(
+                "Search types",
+                value=st.session_state.get("html_type_filter_search", ""),
+                key="html_type_filter_search",
+                placeholder="Search publication types...",
+            ).strip().lower()
+
+            visible_types = [
+                work_type for work_type in html_type_options
+                if not type_search or type_search in work_type.lower()
+            ]
+
+            if not visible_types:
+                st.caption("No publication types match the current search.")
+            else:
+                for work_type in visible_types:
+                    checkbox_key = f"html_type_option_{work_type}"
+                    st.session_state[checkbox_key] = work_type in selected_html_types
+                    st.checkbox(
+                        work_type,
+                        key=checkbox_key,
+                        on_change=_toggle_type_selection,
+                        args=(work_type,),
+                    )
+
+    label_col, help_col = st.columns([1, 4])
+    with label_col:
+        st.markdown("**Filter Keyword**")
+    with help_col:
+        st.caption(
+            "Type one or more keywords to keep only records containing them. "
+            "Use `;` to require multiple keyword fragments. The filter checks visible record text such as title, abstract, topics, keywords, authors, source, and type."
+        )
+    keyword_col1, keyword_col2 = st.columns([1, 4])
+    with keyword_col1:
+        st.write("")
+    with keyword_col2:
+        review_keyword_query = st.text_input(
+            "",
+            value=st.session_state.get("html_keyword_filter", ""),
+            label_visibility="collapsed",
+            key="html_keyword_filter",
+            placeholder="Example: adaptation; risks",
+        ).strip()
+
     label_col, help_col = st.columns([1, 4])
     with label_col:
         st.markdown("**Sort by**")
@@ -242,6 +410,41 @@ def render_literature_review_page(render_html_preview: Callable[..., Any]) -> No
             index=sort_index,
             label_visibility="collapsed",
             key="sb",
+        )
+
+    year_bounds = (1900, 2027)
+    if available_years:
+        year_bounds = (min(available_years), max(available_years))
+
+    existing_year_filter = st.session_state.get("html_year_filter")
+    if available_years:
+        if (
+            not isinstance(existing_year_filter, tuple)
+            or len(existing_year_filter) != 2
+            or existing_year_filter[0] < year_bounds[0]
+            or existing_year_filter[1] > year_bounds[1]
+        ):
+            st.session_state["html_year_filter"] = year_bounds
+    else:
+        st.session_state["html_year_filter"] = year_bounds
+
+    label_col, help_col = st.columns([1, 4])
+    with label_col:
+        st.markdown("**Publication year filter**")
+    with help_col:
+        st.caption("Limit review results to a publication year range when year metadata is available.")
+    year_col1, year_col2 = st.columns([1, 4])
+    with year_col1:
+        st.write("")
+    with year_col2:
+        selected_year_range = st.slider(
+            "",
+            min_value=year_bounds[0],
+            max_value=year_bounds[1],
+            value=st.session_state.get("html_year_filter", year_bounds),
+            label_visibility="collapsed",
+            key="html_year_filter",
+            disabled=not bool(available_years),
         )
 
     html_btn_col1, html_btn_col2, html_btn_col3, html_btn_col4 = st.columns(4)
@@ -277,8 +480,24 @@ def render_literature_review_page(render_html_preview: Callable[..., Any]) -> No
                         continue
                     topics_str = (rec.get("Topics") or "").strip()
                     rec_topics = {x.strip().lower() for x in topics_str.split(";") if x.strip()}
-                    if rec_topics.intersection(selected_lc) or (include_no_generated_topics and not rec_topics):
-                        filtered_records.append(rec)
+                    if not (rec_topics.intersection(selected_lc) or (include_no_generated_topics and not rec_topics)):
+                        continue
+
+                    work_type = str(rec.get("Type") or "").strip()
+                    if selected_html_types and work_type not in selected_html_types:
+                        continue
+
+                    if not _record_matches_keyword_filter(rec, review_keyword_query):
+                        continue
+
+                    record_year = _record_publication_year(rec)
+                    if available_years and record_year is not None:
+                        if record_year < selected_year_range[0] or record_year > selected_year_range[1]:
+                            continue
+                    elif available_years and record_year is None:
+                        continue
+
+                    filtered_records.append(rec)
 
                 active_sort = st.session_state.get("sb", default_sort)
                 if active_sort == "Date":

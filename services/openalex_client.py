@@ -70,6 +70,24 @@ def extract_status_code(exc: Exception) -> int | None:
     return int(status_code) if isinstance(status_code, int) else None
 
 
+def fetch_page(
+    params: dict[str, Any],
+    *,
+    page: int,
+    page_size: int,
+    timeout: int = 30,
+) -> tuple[list[dict[str, Any]], int]:
+    """Fetch a single OpenAlex page and return both records and total count."""
+    response = request_openalex(
+        {**params, "per_page": page_size, "page": page},
+        timeout=timeout,
+    )
+    data = response.json() or {}
+    batch = data.get("results") or []
+    total = int(data.get("meta", {}).get("count") or 0)
+    return batch, total
+
+
 def fetch_paginated(
     params: dict[str, Any],
     *,
@@ -82,11 +100,12 @@ def fetch_paginated(
     collected: list[dict[str, Any]] = []
 
     while limit is None or len(collected) < limit:
-        response = request_openalex(
-            {**params, "per_page": page_size, "page": page},
+        batch, _total = fetch_page(
+            params,
+            page=page,
+            page_size=page_size,
             timeout=timeout,
         )
-        batch = (response.json() or {}).get("results") or []
         if not batch:
             break
         collected.extend(batch)
