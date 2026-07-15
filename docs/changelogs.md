@@ -8,6 +8,24 @@ This file uses an entry format of:
 
 ---
 
+Date: 2026-07-07
+Version: v0.3b
+
+Main activities:
+- Removed the OpenAlex semantic-search checkbox from the search page and standardized the UI on the regular keyword-search path. (files: `pages/literature_search_page.py`, `pages/user_guide_page.py`)
+- Expanded the in-app user guide to reflect the current multi-source workflow, cached-result behavior, review flow, and export behavior. (file: `pages/user_guide_page.py`)
+- Improved keyword-search helper text with clearer guidance to run several focused searches instead of one overly broad query, including concrete examples and rationale. (file: `pages/literature_search_page.py`)
+- Extended Literature Review filtering with publication type, keyword, and publication-year filters, and aligned the type filter with the topic-filter popover pattern. (file: `pages/literature_review_page.py`)
+- Split Literature Export into two user-facing sections: full cached search exports and exports of the records remaining after Literature Review filtering and skipping. (files: `app_lit_wg2.py`, `pages/literature_export_page.py`)
+- Added review-aware export payload construction so export outputs can mirror the active Literature Review state across source, topic, type, keyword, year, and skipped-record filters. (file: `app_lit_wg2.py`)
+- Added multiple standalone service clients for future source expansion, including World Bank-adjacent and multilateral institution adapters that are currently kept at the service layer only. (files under `services/`)
+
+Notes & next steps:
+- Validate the newly added standalone institution clients with targeted runtime probes before integrating any of them into the main search UI.
+- If the export split is final, keep future documentation and screenshots aligned with the two export sections.
+
+---
+
 Date: 2026-05-08
 Version: v0.1a
 
@@ -128,4 +146,39 @@ Notes & next steps:
 
 ---
 
-Last updated: 2026-06-15
+Date: 2026-06-30
+Version: v0.2b
+
+Main activities:
+- Added three new source retrieval client scripts in `services/` for future database extension workflows: `reliefweb_client.py`, `core_client.py`, and `un_digital_library_client.py`.
+- Standardized the new clients to follow the same helper pattern as OpenAlex-style service modules: request helper, `extract_status_code(...)`, pagination helper, and `fetch_results_with_count(...)`.
+- Improved retry behavior in all three new clients by adding support for `Retry-After` response headers with fallback backoff.
+- Added pagination parameter validation guards (`limit > 0`, `page_size > 0`) to prevent invalid loops and fail fast with clear errors.
+- Hardened count-fetch behavior in ReliefWeb and CORE clients by narrowing exception handling and adding warning logs when count retrieval falls back.
+- Added concurrency-safe request pacing for CORE client by protecting rate-limit timing with a lock.
+- Hardened UN Digital Library XML handling by raising clearer parse errors with request context when XML parsing fails.
+- Refreshed project documentation: expanded top-level `README.md`, updated design/development standards, and aligned guide docs with current service architecture and reliability rules.
+
+Notes & next steps:
+- Add lightweight unit tests for pagination validators, retry-delay computation, and XML parse error handling in the new clients.
+- Add optional queue/replay or telemetry for source API transient failures if ingestion workflows become long-running.
+
+---
+
+Date: 2026-07-06
+Version: v0.3a
+
+Main activities:
+- Added direct Literature Review data-source checkboxes so users can filter OpenAlex, ReliefWeb, and UN Digital Library results without opening a dropdown. (file: `pages/literature_review_page.py`)
+- Repositioned the Literature Review data-source helper text above the source options and shortened the caption to "Select one or more data sources to narrow the results." (file: `pages/literature_review_page.py`)
+- Added project-level Streamlit reload configuration with polling file watching and rerun-on-save for more reliable local development in synced folders. (file: `.streamlit/config.toml`)
+- Added local module cache clearing at app startup so Streamlit reruns re-import updated page, feature, service, core, and utility modules after saved code changes. (file: `app_lit_wg2.py`)
+- Removed the unused source-filter dropdown label helper after replacing the source dropdown with direct checkboxes. (file: `pages/literature_review_page.py`)
+
+Notes & next steps:
+- Restart the running Streamlit process once after this update so the new config and app bootstrap logic are loaded.
+- Continue keeping `.streamlit/secrets.toml` untracked; only `.streamlit/config.toml` should be included for shared app configuration.
+
+---
+
+Last updated: 2026-07-07

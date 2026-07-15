@@ -1,10 +1,10 @@
 import json
 import math
+import re
 from collections import Counter
 from itertools import combinations
 from typing import Any
 
-import matplotlib.pyplot as plt
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -12,10 +12,35 @@ import streamlit as st
 
 nx = None
 
-try:
-    from wordcloud import WordCloud
-except Exception:
-    WordCloud = None
+
+def _extract_year_from_record(rec: dict[str, Any]) -> int | None:
+    """Extract publication year from normalized year/date fields."""
+    year_value = rec.get("Publication Year")
+    if year_value is not None:
+        try:
+            return int(year_value)
+        except (ValueError, TypeError):
+            year_match = re.search(r"(19|20)\d{2}", str(year_value))
+            if year_match:
+                return int(year_match.group(0))
+
+    raw_date = rec.get("Publication Date")
+    date_candidates: list[Any]
+    if isinstance(raw_date, dict):
+        date_candidates = [
+            raw_date.get("original"),
+            raw_date.get("created"),
+            raw_date.get("changed"),
+        ]
+    else:
+        date_candidates = [raw_date]
+
+    for candidate in date_candidates:
+        match = re.search(r"(19|20)\d{2}", str(candidate or ""))
+        if match:
+            return int(match.group(0))
+
+    return None
 
 
 def perform_analyze(
@@ -52,6 +77,14 @@ def perform_analyze(
         display.warning("No records found in the search results.")
         return
 
+    record_sources = {
+        str(rec.get("Source") or "OpenAlex").strip() or "OpenAlex"
+        for rec in records
+        if isinstance(rec, dict)
+    }
+    selected_source = next(iter(record_sources)) if len(record_sources) == 1 else ""
+    use_topic_terms_for_keyword_charts = selected_source in {"ReliefWeb", "UN Digital Library"}
+
     start_year, end_year = year_range
     all_years = list(range(start_year, end_year + 1))
     year_labels = [str(y) for y in all_years]
@@ -59,11 +92,9 @@ def perform_analyze(
     # ---- Figure 1: stacked counts per year by type + cumulative curve -------
     pub_rows = []
     for rec in records:
-        year = rec.get("Publication Year")
+        year = _extract_year_from_record(rec)
         work_type = (rec.get("Type") or "Unknown").strip() or "Unknown"
-        try:
-            year = int(year)
-        except (ValueError, TypeError):
+        if year is None:
             continue
         if start_year <= year <= end_year:
             pub_rows.append({"year": year, "type": work_type})
@@ -153,12 +184,12 @@ def perform_analyze(
                 yanchor="top",
                 y=1,
                 xanchor="left",
-                x=1.06,
+                x=1.18,
                 font=dict(size=10),
                 bgcolor=transparent_bg,
             ),
             height=600,
-            margin=dict(l=80, r=190, t=80, b=90),
+            margin=dict(l=80, r=280, t=80, b=90),
             paper_bgcolor=transparent_bg,
             plot_bgcolor=transparent_bg,
         )
@@ -171,13 +202,9 @@ def perform_analyze(
         """Render a keyword/topic heatmap with marginal yearly publication totals."""
         rows = []
         for rec in records:
-            year = rec.get("Publication Year")
+            year = _extract_year_from_record(rec)
             term_str = (rec.get(term_field) or "").strip()
             if not term_str or year is None:
-                continue
-            try:
-                year = int(year)
-            except (ValueError, TypeError):
                 continue
             if not (start_year <= year <= end_year):
                 continue
@@ -212,10 +239,8 @@ def perform_analyze(
 
         pub_year_rows = []
         for rec in records:
-            y = rec.get("Publication Year")
-            try:
-                y = int(y)
-            except (ValueError, TypeError):
+            y = _extract_year_from_record(rec)
+            if y is None:
                 continue
             if start_year <= y <= end_year:
                 pub_year_rows.append(y)
@@ -302,16 +327,26 @@ def perform_analyze(
 
         display.plotly_chart(fig, use_container_width=True)
 
-    # ---- Figure 2: keyword heatmap -----------------------------------------
+    # ---- Figure 2: keyword/topic heatmap -----------------------------------
+    chart_term_field = "Topics" if use_topic_terms_for_keyword_charts else "Keywords"
+    chart_term_label = "Topic" if use_topic_terms_for_keyword_charts else "Keyword"
+    chart_panel_title = (
+        "Top 10 Topics — Frequency by Year (with Marginal Yearly Totals)"
+        if use_topic_terms_for_keyword_charts
+        else "Top 10 Keywords — Frequency by Year (with Marginal Yearly Totals)"
+    )
+    network_control_label = "Number of topics" if use_topic_terms_for_keyword_charts else "Number of keywords"
+    network_title_label = "Topic" if use_topic_terms_for_keyword_charts else "Keyword"
+
     _render_term_heatmap(
-        term_field="Keywords",
-        term_label="Keyword",
-        panel_title="Top 10 Keywords — Frequency by Year (with Marginal Yearly Totals)",
+        term_field=chart_term_field,
+        term_label=chart_term_label,
+        panel_title=chart_panel_title,
     )
 
-    # ---- Figure 3: keyword co-occurrence network ---------------------------
+    # ---- Figure 3: keyword/topic co-occurrence network ---------------------
     network_keyword_count = display.number_input(
-        "Number of keywords",
+        network_control_label,
         min_value=1,
         max_value=30,
         value=10,
@@ -322,13 +357,9 @@ def perform_analyze(
     publication_keywords = []
     keyword_freq = Counter()
     for rec in records:
-        year = rec.get("Publication Year")
-        kw_str = (rec.get("Keywords") or "").strip()
+        year = _extract_year_from_record(rec)
+        kw_str = (rec.get(chart_term_field) or "").strip()
         if not kw_str or year is None:
-            continue
-        try:
-            year = int(year)
-        except (ValueError, TypeError):
             continue
         if not (start_year <= year <= end_year):
             continue
@@ -474,7 +505,7 @@ def perform_analyze(
 
         fig_net.update_layout(
             title=dict(
-                text=f"Keyword Co-occurrence Network (Top {int(network_keyword_count)} Keywords)",
+                text=f"{network_title_label} Co-occurrence Network (Top {int(network_keyword_count)} {network_title_label.lower()}s)",
                 x=0.5,
                 xanchor="center",
                 font=dict(size=16),
@@ -489,58 +520,12 @@ def perform_analyze(
 
         display.plotly_chart(fig_net, use_container_width=True)
     else:
-        display.warning("Not enough keyword data to build the keyword co-occurrence network.")
+        display.warning(f"Not enough {chart_term_label.lower()} data to build the {chart_term_label.lower()} co-occurrence network.")
 
     # ---- Figure 4: topic heatmap -------------------------------------------
-    _render_term_heatmap(
-        term_field="Topics",
-        term_label="Topic",
-        panel_title="Top 10 Topics — Frequency by Year (with Marginal Yearly Totals)",
-    )
-
-    # ---- Figure 5: top-20 topics word cloud -------------------------------
-    topic_rows = []
-    for rec in records:
-        year = rec.get("Publication Year")
-        topic_str = (rec.get("Topics") or "").strip()
-        if not topic_str or year is None:
-            continue
-        try:
-            year = int(year)
-        except (ValueError, TypeError):
-            continue
-        if not (start_year <= year <= end_year):
-            continue
-        topic_rows.extend([t.strip() for t in topic_str.split(";") if t.strip()])
-
-    if not topic_rows:
-        display.warning("No topics found for the word cloud.")
-        return
-
-    top20_topics = pd.Series(topic_rows).value_counts().head(20)
-    if top20_topics.empty:
-        display.warning("Not enough topic data to build the word cloud.")
-        return
-
-    if WordCloud is None:
-        display.warning("Word cloud package is unavailable. Install `wordcloud` to render this figure.")
-        return
-
-    wc = WordCloud(
-        width=1400,
-        height=500,
-        mode="RGBA",
-        background_color=None,
-        colormap="Blues",
-        prefer_horizontal=0.9,
-        random_state=42,
-    ).generate_from_frequencies(top20_topics.to_dict())
-
-    fig_wc, ax = plt.subplots(figsize=(12, 4))
-    fig_wc.patch.set_alpha(0)
-    ax.set_facecolor("none")
-    ax.imshow(wc, interpolation="bilinear")
-    ax.axis("off")
-    ax.set_title("Top 20 Topics — Word Cloud", fontsize=16)
-    display.pyplot(fig_wc, use_container_width=True)
-    plt.close(fig_wc)
+    if not use_topic_terms_for_keyword_charts:
+        _render_term_heatmap(
+            term_field="Topics",
+            term_label="Topic",
+            panel_title="Top 10 Topics — Frequency by Year (with Marginal Yearly Totals)",
+        )
