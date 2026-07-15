@@ -11,8 +11,10 @@ def render_disclaimer_page(base_path: Path) -> None:
     )
     st.markdown("Jump to: [Terms of Use](#terms-of-use) | [Privacy Policy](#privacy-policy)")
     st.markdown(
-        "Please also note that the information provided by Climate Literature Navigator is fully sourced from "
-        "[OpenAlex](https://openalex.org/). While we strive to ensure accuracy, we cannot guarantee the completeness "
+        "Please also note that the information provided by Climate Literature Navigator is sourced from "
+        "[OpenAlex](https://openalex.org/), [ReliefWeb](https://reliefweb.int/), "
+        "[UN Digital Library](https://digitallibrary.un.org/), and "
+        "[World Bank Documents & Reports](https://documents.worldbank.org/). While we strive to ensure accuracy, we cannot guarantee the completeness "
         "or reliability of the data. Users should verify the information independently before making decisions based on it."
     )
 

@@ -279,10 +279,6 @@ def render_html_preview(
             if is_reliefweb or is_un_digital_library
             else f'<div class="html-preview-row"><span class="html-preview-label">Keywords</span>: {keywords}</div>'
         )
-        if not is_reliefweb and not hide_abstracts:
-            abstract_row = (
-                f'<div class="html-preview-row"><span class="html-preview-label">Abstract</span>: {abstract}</div>'
-            )
 
         card_rows = [
             f'<div class="html-preview-row"><span class="html-preview-label">Title</span>: {title}, <span class="html-preview-label">Type</span>: {work_type}</div>',
