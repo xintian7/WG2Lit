@@ -28,6 +28,11 @@ from services.world_bank_client import (
 )
 
 
+WORLD_BANK_DOCUMENTDETAIL_URL_PREFIX = (
+    "https://documents.worldbank.org/en/publication/documents-reports/documentdetail/"
+)
+
+
 def _first_non_empty(values: list[Any]) -> str:
     """Return the first non-empty string value."""
     for value in values:
@@ -277,6 +282,51 @@ def _world_bank_abstract(raw_abstracts: Any) -> str:
     return re.sub(r"\s+", " ", text)
 
 
+def _extract_world_bank_document_id(item: dict[str, Any], raw_urls: list[str]) -> str:
+    """Extract the World Bank document identifier from fields or known URL shapes."""
+    direct_candidate = _first_non_empty([
+        item.get("id"),
+        item.get("docm_id"),
+        item.get("uid"),
+        item.get("guid"),
+    ])
+    direct_id = re.sub(r"\D", "", direct_candidate)
+    if len(direct_id) >= 12:
+        return direct_id
+
+    for raw_url in raw_urls:
+        url = str(raw_url or "").strip()
+        if not url:
+            continue
+
+        match = re.search(r"documentdetail/(\d+)", url, flags=re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+        match = re.search(r"/curated/en/(\d+)(?:/|$)", url, flags=re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+        match = re.search(r"/(\d{12,})(?:\?.*)?$", url)
+        if match:
+            return match.group(1)
+
+    return ""
+
+
+def _world_bank_canonical_url(item: dict[str, Any]) -> str:
+    """Return a canonical World Bank document URL when possible."""
+    raw_urls = [
+        _first_non_empty([item.get("url")]),
+        _first_non_empty([item.get("pdfurl")]),
+        _first_non_empty([item.get("txturl")]),
+    ]
+    document_id = _extract_world_bank_document_id(item, raw_urls)
+    if document_id:
+        return f"{WORLD_BANK_DOCUMENTDETAIL_URL_PREFIX}{document_id}"
+    return _first_non_empty(raw_urls)
+
+
 def _normalize_world_bank_records(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Normalize World Bank documents to the app's tabular export schema."""
     normalized: list[dict[str, Any]] = []
@@ -292,11 +342,7 @@ def _normalize_world_bank_records(results: list[dict[str, Any]]) -> list[dict[st
         if "T" in publication_date:
             publication_date = publication_date.split("T", maxsplit=1)[0]
         publication_year = publication_date[:4] if publication_date else ""
-        url = _first_non_empty([
-            item.get("url"),
-            item.get("pdfurl"),
-            item.get("txturl"),
-        ])
+        url = _world_bank_canonical_url(item)
         theme_names = [part.strip() for part in str(item.get("theme") or "").split(",") if part.strip()]
 
         normalized.append({
