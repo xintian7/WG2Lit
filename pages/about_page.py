@@ -7,7 +7,9 @@ def render_about_page() -> None:
     st.markdown(
         "Climate Literature Navigator (ver 0.4) is a web app developed by the "
         "[IPCC WGII](https://www.ipcc.ch/working-group/wg2/) TSU to help IPCC authors "
-        "find climate-related literature from [OpenAlex](https://openalex.org/)'s database."
+        "find climate-related literature from [OpenAlex](https://openalex.org/), "
+        "[ReliefWeb](https://reliefweb.int/), [UN Digital Library](https://digitallibrary.un.org/), "
+        "and [World Bank Documents & Reports](https://documents.worldbank.org/)."
     )
     st.markdown(
         "You can use the tabs from the left panel to search, analyze, or export literature. "
