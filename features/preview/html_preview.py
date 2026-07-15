@@ -83,7 +83,7 @@ def _display_record_source(rec: dict[str, Any]) -> str:
         return "UN Digital Library"
 
     if provider.lower() == "world bank":
-        return "World Bank"
+        return "World Bank (If you see a 403 error while opening the page, it means the report is not publicly accessible.)"
 
     # OpenAlex records usually omit `Source`; infer from schema fallback.
     if journal_or_source:
