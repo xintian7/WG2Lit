@@ -35,7 +35,7 @@ def render_literature_search_page(
         selected_sources = st.multiselect(
             "",
             options=["OpenAlex", "ReliefWeb", "UN Digital Library", "World Bank"],
-            default=["OpenAlex"],
+            default=["OpenAlex", "ReliefWeb", "UN Digital Library", "World Bank"],
             label_visibility="collapsed",
             key="search_sources",
         )
