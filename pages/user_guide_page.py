@@ -604,6 +604,23 @@ In practice:
 
 def render_user_guide_page() -> None:
     st.divider()
+    st.markdown(
+        """
+        <div style="
+            background-color:#EAF4FF;
+            border:1px solid #BBDFFF;
+            border-radius:8px;
+            padding:12px 14px;
+            margin:8px 0 14px 0;
+            text-align:center;
+            color:#1F2D3D;
+            font-size:15px;
+        ">
+            <strong>Please also kindly note that, for operational reasons, this tool has been developed exclusively for WGII Coordinating Lead Authors (CLAs), Lead Authors (LAs), and Chapter Scientists (CSs) supporting their respective CLAs and LAs. Please do not share this tool beyond this designated user group.</strong>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     lines = _USER_GUIDE_MD.splitlines()
     normalized_lines: list[str] = []
     first_h1_seen = False

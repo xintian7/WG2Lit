@@ -4,6 +4,23 @@ import streamlit as st
 
 def render_disclaimer_page(base_path: Path) -> None:
     st.divider()
+    st.markdown(
+        """
+        <div style="
+            background-color:#EAF4FF;
+            border:1px solid #BBDFFF;
+            border-radius:8px;
+            padding:12px 14px;
+            margin:8px 0 14px 0;
+            text-align:center;
+            color:#1F2D3D;
+            font-size:15px;
+        ">
+            <strong>Please also kindly note that, for operational reasons, this tool has been developed exclusively for WGII Coordinating Lead Authors (CLAs), Lead Authors (LAs), and Chapter Scientists (CSs) supporting their respective CLAs and LAs. Please do not share this tool beyond this designated user group.</strong>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.markdown("# Disclaimer")
     st.markdown(
         "Please carefully review the Terms of Use and Privacy Policy before using this app. "
